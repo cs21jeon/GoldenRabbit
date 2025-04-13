@@ -1,0 +1,38 @@
+name: Update Map Hourly
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 매시간마다 실행
+  workflow_dispatch:  # 수동으로도 실행 가능하게 함
+
+jobs:
+  update-map:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+      
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install folium requests python-dotenv
+        
+    - name: Run map generation script
+      env:
+        VWORLD_APIKEY: ${{ secrets.VWORLD_APIKEY }}
+        AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+      run: python SellBuildingData.py
+        
+    - name: Commit and push if changed
+      run: |
+        git config --global user.email "github-actions@github.com"
+        git config --global user.name "GitHub Actions"
+        git add airtable_map.html
+        git diff --quiet && git diff --staged --quiet || git commit -m "Auto-update map $(date)"
+        git push
