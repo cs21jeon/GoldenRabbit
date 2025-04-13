@@ -26,7 +26,7 @@ jobs:
     - name: Run map generation script
       env:
         VWORLD_APIKEY: ${{ secrets.VWORLD_APIKEY }}
-        AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+        AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
       run: python SellBuildingData.py
         
     - name: Commit and push if changed
