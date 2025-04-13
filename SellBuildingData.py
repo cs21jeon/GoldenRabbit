@@ -8,7 +8,7 @@ load_dotenv()
 
 # 환경 변수에서 API 키 가져오기
 vworld_apikey = os.environ.get('VWORLD_APIKEY', 'YOUR_DEFAULT_KEY')
-airtable_token = os.environ.get('AIRTABLE_TOKEN', 'YOUR_DEFAULT_TOKEN')
+airtable_api_key = os.environ.get('AIRTABLE_API_KEY', 'YOUR_DEFAULT_API_KEY')
 
 base_id = 'appGSg5QfDNKgFf73'
 table_id = 'tblnR438TK52Gr0HB'
@@ -39,7 +39,7 @@ def get_airtable_data():
     
     # 문서에 나온 대로 Bearer 토큰 방식으로 인증 헤더 설정
     headers = {
-        'Authorization': f'Bearer {airtable_token}',
+        'Authorization': f'Bearer {airtable_api_key}',
         'Content-Type': 'application/json'
     }
     
