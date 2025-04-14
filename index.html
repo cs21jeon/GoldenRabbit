@@ -832,5 +832,160 @@
         });
     });
 </script>
+    <!-- 모바일 하단 네비게이션 -->
+<div class="mobile-nav">
+  <a href="#welcome" class="mobile-nav-item">
+    <div class="mobile-nav-icon">🏠</div>
+    <div class="mobile-nav-text">홈</div>
+  </a>
+  <a href="#properties" class="mobile-nav-item">
+    <div class="mobile-nav-icon">🏢</div>
+    <div class="mobile-nav-text">매물정보</div>
+  </a>
+  <a href="#contact" class="mobile-nav-item">
+    <div class="mobile-nav-icon">📞</div>
+    <div class="mobile-nav-text">상담문의</div>
+  </a>
+  <a href="#location" class="mobile-nav-item">
+    <div class="mobile-nav-icon">🗺️</div>
+    <div class="mobile-nav-text">오시는길</div>
+  </a>
+</div>
+<style>
+  /* 모바일 하단 네비게이션 스타일 */
+  .mobile-nav {
+    display: none; /* 기본적으로 숨김 */
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background-color: white;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+    z-index: 1000;
+    padding: 10px 0 5px;
+    transform: translateY(100%);
+    transition: transform 0.3s ease-in-out;
+    border-top-left-radius: 15px;
+    border-top-right-radius: 15px;
+  }
+  
+  .mobile-nav.visible {
+    transform: translateY(0);
+  }
+  
+  .mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-decoration: none;
+    color: #666;
+    width: 25%;
+    float: left;
+    padding: 5px 0;
+    transition: color 0.3s;
+  }
+  
+  .mobile-nav-item:hover, .mobile-nav-item.active {
+    color: var(--main-color);
+  }
+  
+  .mobile-nav-icon {
+    font-size: 24px;
+    margin-bottom: 2px;
+  }
+  
+  .mobile-nav-text {
+    font-size: 12px;
+    font-weight: 500;
+  }
+  
+  /* 모바일 화면에서만 네비게이션 표시 */
+  @media (max-width: 768px) {
+    .mobile-nav {
+      display: flex;
+      justify-content: space-around;
+    }
+    
+    body {
+      padding-bottom: 70px; /* 모바일 네비게이션 높이만큼 여백 추가 */
+    }
+  }
+</style>
+
+<script>
+  // 스크롤 이벤트 처리 - 모바일 네비게이션 표시
+  document.addEventListener('DOMContentLoaded', function() {
+    const mobileNav = document.querySelector('.mobile-nav');
+    let lastScrollTop = 0;
+    let scrollThreshold = 100; // 스크롤 임계값
+    let isVisible = false;
+    
+    // 스크롤 이벤트 리스너
+    window.addEventListener('scroll', function() {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      
+      // 스크롤 방향 감지
+      if (scrollTop > lastScrollTop && scrollTop > scrollThreshold && !isVisible) {
+        // 아래로 스크롤 - 모바일 내비게이션 표시
+        mobileNav.classList.add('visible');
+        isVisible = true;
+      } else if (scrollTop < lastScrollTop && isVisible && scrollTop < scrollThreshold) {
+        // 위로 스크롤 및 상단 근처 - 모바일 내비게이션 숨김
+        mobileNav.classList.remove('visible');
+        isVisible = false;
+      }
+      
+      lastScrollTop = scrollTop <= 0 ? 0 : scrollTop;
+      
+      // 현재 보이는 섹션에 따라 활성 메뉴 표시
+      updateActiveNavItem();
+    });
+    
+    // 현재 위치한 섹션에 따른 메뉴 활성화
+    function updateActiveNavItem() {
+      const sections = ['welcome', 'properties', 'contact', 'location'];
+      const navItems = document.querySelectorAll('.mobile-nav-item');
+      
+      // 현재 위치하는 섹션 찾기
+      let currentSectionIndex = 0;
+      sections.forEach((sectionId, index) => {
+        const section = document.getElementById(sectionId);
+        if (section) {
+          const rect = section.getBoundingClientRect();
+          if (rect.top <= 150 && rect.bottom >= 150) {
+            currentSectionIndex = index;
+          }
+        }
+      });
+      
+      // 모든 메뉴 비활성화
+      navItems.forEach(item => item.classList.remove('active'));
+      
+      // 현재 섹션에 해당하는 메뉴 활성화
+      navItems[currentSectionIndex].classList.add('active');
+    }
+    
+    // 페이지 로드 시 바로 실행
+    updateActiveNavItem();
+    
+    // 모바일 네비게이션 메뉴 클릭 시 부드러운 스크롤
+    document.querySelectorAll('.mobile-nav-item').forEach(anchor => {
+      anchor.addEventListener('click', function(e) {
+        e.preventDefault();
+        
+        const targetId = this.getAttribute('href');
+        if (targetId === '#') return;
+        
+        const targetElement = document.querySelector(targetId);
+        if (targetElement) {
+          window.scrollTo({
+            top: targetElement.offsetTop,
+            behavior: 'smooth'
+          });
+        }
+      });
+    });
+  });
+</script>
 </body>
 </html>
