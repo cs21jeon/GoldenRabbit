@@ -1,4 +1,4 @@
-name: Update Map Hourly
+name: Update Map Daily
 
 on:
   schedule:
