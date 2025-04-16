@@ -414,7 +414,7 @@ def create_map():
     """
     
     # HTML 파일 저장
-    output_path = '/home/sftpuser/www/airtable_map.html'
+    output_path = '/home/sftpuser/www/airtable_map_v2.html'
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html_content)
     
