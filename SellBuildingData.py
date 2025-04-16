@@ -157,34 +157,34 @@ def get_airtable_data():
 
 def create_map():
     """지도를 생성하고 저장하는 함수"""
-    # 지도 생성 - 동작구 중심으로 설정 (map 대신 folium_map 사용)
+    # 지도 생성 - 동작구 중심으로 설정
     folium_map = folium.Map(
         location=[37.5, 126.95],  # 동작구 중심 좌표
         zoom_start=14,  # 동작구 정도의 면적이 보이는 확대 레벨
     )
     
-    # 기본 타일 레이어 추가 (map 대신 folium_map 사용)
+    # 기본 타일 레이어 추가 - API 키 노출 방지를 위해 프록시 URL 사용
     folium.TileLayer(
-        tiles=f'https://api.vworld.kr/req/wmts/1.0.0/{vworld_apikey}/Base/{{z}}/{{y}}/{{x}}.png',
+        tiles='http://goldenrabbit21.cafe24.com:8000/api/vtile?z={z}&y={y}&x={x}',
         attr='공간정보 오픈플랫폼(브이월드)',
         name='브이월드 배경지도',
     ).add_to(folium_map)
     
-    # WMS 타일 레이어 추가 (map 대신 folium_map 사용)
+    # WMS 타일 레이어 추가 - API 키 노출 방지를 위해 프록시 URL 사용
     folium.WmsTileLayer(
-        url='https://api.vworld.kr/req/wms?',
+        url='http://goldenrabbit21.cafe24.com:8000/api/wms?',
         layers='lt_c_landinfobasemap',
         request='GetMap',
         version='1.3.0',
         height=256,
         width=256,
-        key=vworld_apikey,
+        # key 파라미터 제거 (프록시에서 처리)
         fmt='image/png',
         transparent=True,
         name='LX맵(편집지적도)',
     ).add_to(folium_map)
     
-    # 레이어 컨트롤 추가 (map 대신 folium_map 사용)
+    # 레이어 컨트롤 추가
     folium.LayerControl().add_to(folium_map)
     
     # 에어테이블에서 주소 데이터 가져오기
@@ -192,196 +192,217 @@ def create_map():
     
     if not address_data:
         print("에어테이블에서 가져온 주소 데이터가 없습니다.")
-        return folium_map  # map 대신 folium_map 반환
+        return folium_map
     
     # address_data를 JSON 형식으로 변환하여 HTML에 삽입
     import json
     address_data_json = json.dumps(address_data)
 
-    # JavaScript 코드를 생성하여 HTML에 삽입
-    js_code = f"""
-    <script>
-    // 주소 데이터를 JavaScript 변수로 저장
-    const addressData = {address_data_json};
-    var mapObj = null;  // 전역 변수로 map 객체 선언
+    # 외부 JavaScript 파일 생성 (map is not defined 문제 해결)
+    external_js_path = '/home/sftpuser/www/map_script.js'
+    with open(external_js_path, 'w', encoding='utf-8') as f:
+        f.write(f"""
+// 주소 데이터 (Python에서 전달)
+const addressData = {address_data_json};
 
-    // 페이지 로드 완료 시 실행
-    document.addEventListener('DOMContentLoaded', function() {{
-        // 모든 'map_'으로 시작하는 ID를 가진 요소를 찾음
-        const mapElements = document.querySelectorAll('[id^="map_"]');
-        if (mapElements.length > 0) {{
-            const mapId = mapElements[0].id;
-            console.log(`맵 요소 ID: ${{mapId}}`);
-            
-            // 맵 ID를 이용해 전역 맵 객체 찾기
+// 맵 객체 참조 변수
+let mapObj = null;
+
+// 페이지 로드 완료 시 실행
+document.addEventListener('DOMContentLoaded', function() {{
+    console.log('DOM 로드 완료');
+    
+    // 맵 요소 찾기
+    const mapElements = document.querySelectorAll('div[id^="map_"]');
+    if (mapElements.length > 0) {{
+        const mapId = mapElements[0].id;
+        console.log('맵 요소 ID:', mapId);
+        
+        // 맵 객체 찾기 시도 함수
+        function findMapObject() {{
+            // window[mapId]로 맵 객체 찾기 시도
             if (window[mapId]) {{
-                mapObj = window[mapId];
-                console.log(`맵 객체를 window.${{mapId}}에서 찾았습니다`);
+                console.log('맵 객체 찾음:', mapId);
+                return window[mapId];
+            }}
+            
+            // window 객체에서 map_으로 시작하는 모든 속성 검색
+            const mapKeys = Object.keys(window).filter(key => key.startsWith('map_'));
+            console.log('가능한 맵 객체 키:', mapKeys);
+            
+            // 첫 번째 발견된 맵 객체 반환
+            for (const key of mapKeys) {{
+                if (window[key] && typeof window[key].setView === 'function') {{
+                    console.log('맵 객체를 다른 키로 찾음:', key);
+                    return window[key];
+                }}
+            }}
+            
+            return null;
+        }}
+        
+        // 맵 객체 찾기 및 주소 처리
+        function initializeMap() {{
+            mapObj = findMapObject();
+            
+            if (mapObj) {{
+                console.log('맵 초기화 성공, 주소 처리 시작');
                 processAddresses();
             }} else {{
-                console.log(`맵 객체를 찾을 수 없습니다. 5초 후 다시 시도합니다.`);
-                // 맵 객체가 아직 로드되지 않았을 수 있으므로 지연 후 재시도
-                setTimeout(function() {{
-                    if (window[mapId]) {{
-                        mapObj = window[mapId];
-                        console.log(`맵 객체를 window.${{mapId}}에서 찾았습니다`);
-                        processAddresses();
-                    }} else {{
-                        console.error(`맵 객체를 찾을 수 없습니다.`);
-                    }}
-                }}, 5000);
+                console.error('맵 객체를 찾을 수 없음');
             }}
-        }} else {{
-            console.error("맵 요소를 찾을 수 없습니다");
         }}
-    }});
+        
+        // 1초 후에 초기화 시도 (맵이 로드될 시간 제공)
+        setTimeout(initializeMap, 1000);
+    }} else {{
+        console.error('맵 요소를 찾을 수 없음');
+    }}
+}});
 
-    // 주소 처리 함수
-    async function processAddresses() {{
-        // 모든 주소에 대해 좌표 변환 및 마커 추가
-        for (const addr of addressData) {{
-            try {{
-                // API 호출 URL을 명시적으로 지정
-                const apiUrl = `http://goldenrabbit21.cafe24.com:8000/api/vworld?address=${{encodeURIComponent(addr[1])}}`;
-                console.log(`API 요청 URL: ${{apiUrl}}`);
-                const response = await fetch(apiUrl);
-                const data = await response.json();
+// 주소 처리 함수
+async function processAddresses() {{
+    console.log('주소 처리 시작, 데이터 수:', addressData.length);
+    
+    // 모든 주소 처리
+    for (const addr of addressData) {{
+        try {{
+            // API 호출 URL
+            const apiUrl = `http://goldenrabbit21.cafe24.com:8000/api/vworld?address=${{encodeURIComponent(addr[1])}}`;
+            console.log(`좌표 요청: ${{addr[1]}}`);
+            
+            const response = await fetch(apiUrl);
+            const data = await response.json();
+            
+            if (data.response && data.response.status === 'OK') {{
+                const point = data.response.result.point;
                 
-                // 좌표 정보가 있는지 확인
-                if (data.response && data.response.status === 'OK') {{
-                    const result = data.response.result;
-                    const point = result.point;
-                    
-                    if (point && point.x && point.y) {{
-                        // 금액을 억 단위로 변환
-                        let priceDisplay = addr[2];
-                        if (typeof addr[2] === 'number' && addr[2] >= 10000) {{
-                            // 10000만원(1억) 이상인 경우
-                            const priceInBillions = addr[2] / 10000;
-                            if (priceInBillions % 1 === 0) {{
-                                // 정수인 경우 (예: 3억)
-                                priceDisplay = `${{Math.floor(priceInBillions)}}억원`;
-                            }} else {{
-                                // 소수점이 있는 경우 (예: 3.5억)
-                                priceDisplay = `${{priceInBillions.toFixed(1).replace('.0', '')}}억원`;
-                            }}
-                        }} else {{
-                            // 1억 미만인 경우 (만원 단위 유지)
-                            if (typeof addr[2] === 'number') {{
-                                priceDisplay = `${{addr[2].toLocaleString()}}만원`;
-                            }} else {{
-                                priceDisplay = `${{addr[2]}}만원`;
-                            }}
-                        }}
-                        
-                        // 현황 정보 처리
-                        let statusInfo = "";
-                        if (addr[3]) {{
-                            if (Array.isArray(addr[3])) {{
-                                statusInfo = `현황: ${{addr[3].join(', ')}}`;
-                            }} else {{
-                                statusInfo = `현황: ${{addr[3]}}`;
-                            }}
-                        }}
-                        
-                        // 주소에서 첫 번째 공백 이후의 부분만 추출
-                        let dongBunji = addr[1];
-                        if (addr[1].includes(' ')) {{
-                            dongBunji = addr[1].substring(addr[1].indexOf(' ') + 1);
-                        }}
-                        
-                        // 팝업 내용 생성
-                        let popupContent = '<div style="font-size: 14px;">';
-                        popupContent += `<b>지번: ${{dongBunji}}</b>`;
-                        popupContent += `<br><b>매가: ${{priceDisplay}}</b>`;
-                        
-                        // 추가 필드 값 처리
-                        const fieldValues = addr[4];
-                        
-                        // 대지 정보 추가
-                        if (fieldValues['토지면적(㎡)']) {{
-                            try {{
-                                const landAreaSqm = parseFloat(fieldValues['토지면적(㎡)']);
-                                const landAreaPyeong = Math.round(landAreaSqm / 3.3058);
-                                popupContent += `<br><b>대지:</b> ${{landAreaPyeong}}평 (${{landAreaSqm}}㎡)`;
-                            }} catch (e) {{}}
-                        }}
-                        
-                        // 연식 정보 추가
-                        if (fieldValues['사용승인일']) {{
-                            try {{
-                                const approvalDate = String(fieldValues['사용승인일']);
-                                if (approvalDate.includes('-') || approvalDate.includes('/')) {{
-                                    const year = approvalDate.includes('-') ? 
-                                        approvalDate.split('-')[0] : approvalDate.split('/')[0];
-                                    popupContent += `<br>연식: ${{year}}년`;
-                                }} else if (approvalDate.length >= 4) {{
-                                    popupContent += `<br>연식: ${{approvalDate.substring(0, 4)}}년`;
-                                }}
-                            }} catch (e) {{}}
-                        }}
-                        
-                        // 주용도 정보 추가
-                        if (fieldValues['주용도']) {{
-                            popupContent += `<br>용도: ${{fieldValues['주용도']}}`;
-                        }}
-                        
-                        // 층수 정보 추가
-                        if (fieldValues['층수']) {{
-                            popupContent += `<br>층수: ${{fieldValues['층수']}}`;
-                        }}
-                        
-                        popupContent += '</div>';
-                        
-                        // 툴팁 내용
-                        const tooltipContent = `${{dongBunji}} | ${{priceDisplay}}`;
-                        
-                        // 마커 생성 및 지도에 추가
-                        L.marker([point.y, point.x], {{
-                            icon: L.AwesomeMarkers.icon({{
-                                markerColor: 'red',
-                                iconColor: 'white',
-                                icon: 'bookmark',
-                                prefix: 'glyphicon'
-                            }})
-                        }})
-                        .bindPopup(L.popup({{ maxWidth: 250 }}).setContent(popupContent))
-                        .bindTooltip(tooltipContent, {{ sticky: true }})
-                        .addTo(mapObj);  // 중요: map 대신 mapObj 사용
-                        
-                        console.log(`마커 추가: ${{dongBunji}}, 좌표: ${{point.y}}, ${{point.x}}`);
-                    }}
+                if (point && point.x && point.y) {{
+                    // 마커 추가 로직
+                    addMarker(point, addr);
+                    console.log(`마커 추가 완료: ${{addr[1]}}`);
                 }}
-            }} catch (error) {{
-                console.error(`주소 검색 실패: ${{addr[1]}}`, error);
+            }} else {{
+                console.warn(`좌표 변환 실패: ${{addr[1]}}`);
             }}
+        }} catch (error) {{
+            console.error(`주소 처리 오류: ${{addr[1]}}`, error);
         }}
     }}
-    </script>
-    """
+}}
 
-    # folium_map을 사용하여 HTML에 스크립트 추가
-    folium_map.get_root().html.add_child(folium.Element(f"""
-    <script>
-    // 페이지가 완전히 로드된 후 실행
-    document.addEventListener('DOMContentLoaded', function() {{
-        // 맵 객체가 정의되었는지 확인
-        console.log("DOMContentLoaded 이벤트 발생");
-        
-        // 모든 맵 관련 전역 변수 확인
-        const mapVars = Object.keys(window).filter(key => key.startsWith('map_'));
-        console.log("맵 관련 전역 변수:", mapVars);
-    }});
-    </script>
-    """))
+// 마커 추가 함수
+function addMarker(point, addr) {{
+    // 가격 포맷팅
+    let priceDisplay = formatPrice(addr[2]);
     
-    # JavaScript 코드 추가
-    folium_map.get_root().html.add_child(folium.Element(js_code))
+    // 주소 추출
+    let dongBunji = addr[1];
+    if (addr[1].includes(' ')) {{
+        dongBunji = addr[1].substring(addr[1].indexOf(' ') + 1);
+    }}
+    
+    // 팝업 내용 생성
+    let popupContent = '<div style="font-size: 14px;">';
+    popupContent += `<b>지번: ${{dongBunji}}</b>`;
+    popupContent += `<br><b>매가: ${{priceDisplay}}</b>`;
+    
+    // 추가 필드 처리
+    const fieldValues = addr[4];
+    
+    // 대지 정보 추가
+    if (fieldValues['토지면적(㎡)']) {{
+        try {{
+            const landAreaSqm = parseFloat(fieldValues['토지면적(㎡)']);
+            const landAreaPyeong = Math.round(landAreaSqm / 3.3058);
+            popupContent += `<br><b>대지:</b> ${{landAreaPyeong}}평 (${{landAreaSqm}}㎡)`;
+        }} catch (e) {{}}
+    }}
+    
+    // 연식 정보 추가
+    if (fieldValues['사용승인일']) {{
+        try {{
+            const approvalDate = String(fieldValues['사용승인일']);
+            if (approvalDate.includes('-') || approvalDate.includes('/')) {{
+                const year = approvalDate.includes('-') ? 
+                    approvalDate.split('-')[0] : approvalDate.split('/')[0];
+                popupContent += `<br>연식: ${{year}}년`;
+            }} else if (approvalDate.length >= 4) {{
+                popupContent += `<br>연식: ${{approvalDate.substring(0, 4)}}년`;
+            }}
+        }} catch (e) {{}}
+    }}
+    
+    // 주용도 정보 추가
+    if (fieldValues['주용도']) {{
+        popupContent += `<br>용도: ${{fieldValues['주용도']}}`;
+    }}
+    
+    // 층수 정보 추가
+    if (fieldValues['층수']) {{
+        popupContent += `<br>층수: ${{fieldValues['층수']}}`;
+    }}
+    
+    popupContent += '</div>';
+    
+    // 툴팁 내용
+    const tooltipContent = `${{dongBunji}} | ${{priceDisplay}}`;
+    
+    // 맵 객체가 유효한지 확인
+    if (!mapObj) {{
+        console.error('마커 추가 실패: 맵 객체가 없음');
+        return;
+    }}
+    
+    // 마커 생성 및 지도에 추가
+    try {{
+        L.marker([point.y, point.x], {{
+            icon: L.AwesomeMarkers.icon({{
+                markerColor: 'red',
+                iconColor: 'white',
+                icon: 'bookmark',
+                prefix: 'glyphicon'
+            }})
+        }})
+        .bindPopup(L.popup({{ maxWidth: 250 }}).setContent(popupContent))
+        .bindTooltip(tooltipContent, {{ sticky: true }})
+        .addTo(mapObj);
+    }} catch (e) {{
+        console.error('마커 생성 오류:', e);
+    }}
+}}
+
+// 가격 포맷팅 함수
+function formatPrice(price) {{
+    if (typeof price === 'number' && price >= 10000) {{
+        // 10000만원(1억) 이상인 경우
+        const priceInBillions = price / 10000;
+        if (priceInBillions % 1 === 0) {{
+            return `${{Math.floor(priceInBillions)}}억원`;
+        }} else {{
+            return `${{priceInBillions.toFixed(1).replace('.0', '')}}억원`;
+        }}
+    }} else {{
+        // 1억 미만인 경우
+        if (typeof price === 'number') {{
+            return `${{price.toLocaleString()}}만원`;
+        }} else {{
+            return `${{price || '정보없음'}}`;
+        }}
+    }}
+}}
+        """)
+    print(f"JavaScript 파일 생성: {external_js_path}")
+    
+    # 외부 JavaScript 파일을 로드하는 태그 추가
+    folium_map.get_root().html.add_child(folium.Element("""
+    <script src="/map_script.js"></script>
+    """))
     
     return folium_map
 
 if __name__ == "__main__":
-    # 지도 생성 및 저장 (map 대신 folium_map 사용)
+    # 지도 생성 및 저장
     folium_map = create_map()
     folium_map.save('/home/sftpuser/www/airtable_map.html')
     print("지도가 airtable_map.html 파일로 저장되었습니다.")

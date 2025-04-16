@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 import requests
 import os
 from dotenv import load_dotenv
@@ -11,8 +11,7 @@ load_dotenv()
 
 # Flask 앱 설정
 app = Flask(__name__)
-# CORS 설정 수정
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(app)  # CORS 지원 추가
 vworld_key = os.environ.get("VWORLD_APIKEY")
 
 # 로깅 설정
@@ -41,7 +40,7 @@ def vworld_geocode():
     address = request.args.get('address')
     if not address:
         return jsonify({"error": "Missing address parameter"}), 400
-
+    
     logger.info(f"Geocoding request for address: {address}")
     
     try:
@@ -73,6 +72,53 @@ def vworld_geocode():
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+# V-World 타일 프록시 엔드포인트 추가
+@app.route('/api/vtile')
+def vworld_tile():
+    """V-World 타일을 프록시하는 엔드포인트"""
+    try:
+        z = request.args.get('z')
+        y = request.args.get('y')
+        x = request.args.get('x')
+        
+        if not all([z, y, x]):
+            return jsonify({"error": "Missing parameters"}), 400
+            
+        url = f"https://api.vworld.kr/req/wmts/1.0.0/{vworld_key}/Base/{z}/{y}/{x}.png"
+        response = requests.get(url)
+        
+        # Response 객체 대신 make_response 사용
+        return make_response(
+            response.content, 
+            response.status_code,
+            {'Content-Type': response.headers.get('Content-Type', 'image/png')}
+        )
+    except Exception as e:
+        logger.error(f"Tile proxy error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# V-World WMS 프록시 엔드포인트 추가
+@app.route('/api/wms')
+def vworld_wms():
+    """V-World WMS를 프록시하는 엔드포인트"""
+    try:
+        # WMS 파라미터 전달
+        params = {k: v for k, v in request.args.items()}
+        params['key'] = vworld_key  # API 키 추가
+        
+        url = "https://api.vworld.kr/req/wms"
+        response = requests.get(url, params=params)
+        
+        # Response 객체 대신 make_response 사용
+        return make_response(
+            response.content, 
+            response.status_code,
+            {'Content-Type': response.headers.get('Content-Type', 'image/png')}
+        )
+    except Exception as e:
+        logger.error(f"WMS proxy error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/health')
 def health_check():
