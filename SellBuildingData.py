@@ -329,8 +329,10 @@ def create_map():
     </script>
     """
 
-    # Python으로 생성한 마커 추가 코드 대신 JavaScript 코드를 HTML에 삽입
+    # map 이름을 JS 변수로 지정
+    map.get_root().html.add_child(folium.Element(f"<script>var map = {map.get_name()};</script>"))
     map.get_root().html.add_child(folium.Element(js_code))
+
     
     return map
 
