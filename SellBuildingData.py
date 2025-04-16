@@ -157,20 +157,20 @@ def get_airtable_data():
 
 def create_map():
     """지도를 생성하고 저장하는 함수"""
-    # 지도 생성 - 동작구 중심으로 설정
+    # 지도 생성 - 동작구 중심으로 설정 (map 대신 folium_map 사용)
     folium_map = folium.Map(
         location=[37.5, 126.95],  # 동작구 중심 좌표
         zoom_start=14,  # 동작구 정도의 면적이 보이는 확대 레벨
     )
     
-    # 기본 타일 레이어 추가
+    # 기본 타일 레이어 추가 (map 대신 folium_map 사용)
     folium.TileLayer(
         tiles=f'https://api.vworld.kr/req/wmts/1.0.0/{vworld_apikey}/Base/{{z}}/{{y}}/{{x}}.png',
         attr='공간정보 오픈플랫폼(브이월드)',
         name='브이월드 배경지도',
     ).add_to(folium_map)
     
-    # WMS 타일 레이어 추가
+    # WMS 타일 레이어 추가 (map 대신 folium_map 사용)
     folium.WmsTileLayer(
         url='https://api.vworld.kr/req/wms?',
         layers='lt_c_landinfobasemap',
@@ -184,7 +184,7 @@ def create_map():
         name='LX맵(편집지적도)',
     ).add_to(folium_map)
     
-    # 레이어 컨트롤 추가
+    # 레이어 컨트롤 추가 (map 대신 folium_map 사용)
     folium.LayerControl().add_to(folium_map)
     
     # 에어테이블에서 주소 데이터 가져오기
@@ -192,13 +192,13 @@ def create_map():
     
     if not address_data:
         print("에어테이블에서 가져온 주소 데이터가 없습니다.")
-        return folium_map
+        return folium_map  # map 대신 folium_map 반환
     
     # address_data를 JSON 형식으로 변환하여 HTML에 삽입
     import json
     address_data_json = json.dumps(address_data)
 
-    # 수정된 JavaScript 코드
+    # JavaScript 코드를 생성하여 HTML에 삽입
     js_code = f"""
     <script>
     // 주소 데이터를 JavaScript 변수로 저장
@@ -207,24 +207,36 @@ def create_map():
 
     // 페이지 로드 완료 시 실행
     document.addEventListener('DOMContentLoaded', function() {{
-        // 지도가 로드될 때까지 기다림
-        var waitForMap = setInterval(function() {{
-            // Folium에 의해 생성된 맵 객체 찾기
-            try {{
-                // map_1은 일반적으로 Folium이 생성하는 맵 ID
-                mapObj = window['{folium_map.get_name()}'];
-                if (mapObj) {{
-                    clearInterval(waitForMap);
-                    console.log("지도 객체를 찾았습니다!");
-                    processAddresses();
-                }}
-            }} catch (e) {{
-                console.error("지도 객체 찾기 실패:", e);
+        // 모든 'map_'으로 시작하는 ID를 가진 요소를 찾음
+        const mapElements = document.querySelectorAll('[id^="map_"]');
+        if (mapElements.length > 0) {{
+            const mapId = mapElements[0].id;
+            console.log(`맵 요소 ID: ${{mapId}}`);
+            
+            // 맵 ID를 이용해 전역 맵 객체 찾기
+            if (window[mapId]) {{
+                mapObj = window[mapId];
+                console.log(`맵 객체를 window.${{mapId}}에서 찾았습니다`);
+                processAddresses();
+            }} else {{
+                console.log(`맵 객체를 찾을 수 없습니다. 5초 후 다시 시도합니다.`);
+                // 맵 객체가 아직 로드되지 않았을 수 있으므로 지연 후 재시도
+                setTimeout(function() {{
+                    if (window[mapId]) {{
+                        mapObj = window[mapId];
+                        console.log(`맵 객체를 window.${{mapId}}에서 찾았습니다`);
+                        processAddresses();
+                    }} else {{
+                        console.error(`맵 객체를 찾을 수 없습니다.`);
+                    }}
+                }}, 5000);
             }}
-        }}, 500);
+        }} else {{
+            console.error("맵 요소를 찾을 수 없습니다");
+        }}
     }});
 
-    // 주소 처리 함수를 별도로 분리
+    // 주소 처리 함수
     async function processAddresses() {{
         // 모든 주소에 대해 좌표 변환 및 마커 추가
         for (const addr of addressData) {{
@@ -324,7 +336,7 @@ def create_map():
                         // 툴팁 내용
                         const tooltipContent = `${{dongBunji}} | ${{priceDisplay}}`;
                         
-                        // 마커 생성 및 지도에 추가 (mapObj 사용)
+                        // 마커 생성 및 지도에 추가
                         L.marker([point.y, point.x], {{
                             icon: L.AwesomeMarkers.icon({{
                                 markerColor: 'red',
@@ -335,7 +347,7 @@ def create_map():
                         }})
                         .bindPopup(L.popup({{ maxWidth: 250 }}).setContent(popupContent))
                         .bindTooltip(tooltipContent, {{ sticky: true }})
-                        .addTo(mapObj);  // map 대신 mapObj 사용
+                        .addTo(mapObj);  // 중요: map 대신 mapObj 사용
                         
                         console.log(`마커 추가: ${{dongBunji}}, 좌표: ${{point.y}}, ${{point.x}}`);
                     }}
@@ -348,11 +360,18 @@ def create_map():
     </script>
     """
 
-    # 지도 객체를 확실하게 노출시키는 스크립트 추가
+    # folium_map을 사용하여 HTML에 스크립트 추가
     folium_map.get_root().html.add_child(folium.Element(f"""
     <script>
-    // 맵 객체를 명시적으로 전역 변수로 노출
-    window['{folium_map.get_name()}'] = {folium_map.get_name()};
+    // 페이지가 완전히 로드된 후 실행
+    document.addEventListener('DOMContentLoaded', function() {{
+        // 맵 객체가 정의되었는지 확인
+        console.log("DOMContentLoaded 이벤트 발생");
+        
+        // 모든 맵 관련 전역 변수 확인
+        const mapVars = Object.keys(window).filter(key => key.startsWith('map_'));
+        console.log("맵 관련 전역 변수:", mapVars);
+    }});
     </script>
     """))
     
@@ -362,7 +381,7 @@ def create_map():
     return folium_map
 
 if __name__ == "__main__":
-    # 지도 생성 및 저장
+    # 지도 생성 및 저장 (map 대신 folium_map 사용)
     folium_map = create_map()
     folium_map.save('/home/sftpuser/www/airtable_map.html')
     print("지도가 airtable_map.html 파일로 저장되었습니다.")
