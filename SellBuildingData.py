@@ -158,7 +158,7 @@ def get_airtable_data():
 def create_map():
     """지도를 생성하고 저장하는 함수"""
     # 지도 생성 - 동작구 중심으로 설정
-    map = folium.Map(
+    folium_map = folium.Map(
         location=[37.5, 126.95],  # 동작구 중심 좌표
         zoom_start=14,  # 동작구 정도의 면적이 보이는 확대 레벨
     )
@@ -168,7 +168,7 @@ def create_map():
         tiles=f'https://api.vworld.kr/req/wmts/1.0.0/{vworld_apikey}/Base/{{z}}/{{y}}/{{x}}.png',
         attr='공간정보 오픈플랫폼(브이월드)',
         name='브이월드 배경지도',
-    ).add_to(map)
+    ).add_to(folium_map)
     
     # WMS 타일 레이어 추가
     folium.WmsTileLayer(
@@ -182,17 +182,17 @@ def create_map():
         fmt='image/png',
         transparent=True,
         name='LX맵(편집지적도)',
-    ).add_to(map)
+    ).add_to(folium_map)
     
     # 레이어 컨트롤 추가
-    folium.LayerControl().add_to(map)
+    folium.LayerControl().add_to(folium_map)
     
     # 에어테이블에서 주소 데이터 가져오기
     address_data = get_airtable_data()
     
     if not address_data:
         print("에어테이블에서 가져온 주소 데이터가 없습니다.")
-        return map
+        return folium_map
     
     # address_data를 JSON 형식으로 변환하여 HTML에 삽입
     import json
@@ -212,7 +212,7 @@ def create_map():
             // Folium에 의해 생성된 맵 객체 찾기
             try {{
                 // map_1은 일반적으로 Folium이 생성하는 맵 ID
-                mapObj = window['{map.get_name()}'];
+                mapObj = window['{folium_map.get_name()}'];
                 if (mapObj) {{
                     clearInterval(waitForMap);
                     console.log("지도 객체를 찾았습니다!");
@@ -349,20 +349,20 @@ def create_map():
     """
 
     # 지도 객체를 확실하게 노출시키는 스크립트 추가
-    map.get_root().html.add_child(folium.Element(f"""
+    folium_map.get_root().html.add_child(folium.Element(f"""
     <script>
     // 맵 객체를 명시적으로 전역 변수로 노출
-    window['{map.get_name()}'] = {map.get_name()};
+    window['{folium_map.get_name()}'] = {folium_map.get_name()};
     </script>
     """))
     
     # JavaScript 코드 추가
-    map.get_root().html.add_child(folium.Element(js_code))
+    folium_map.get_root().html.add_child(folium.Element(js_code))
     
-    return map
+    return folium_map
 
 if __name__ == "__main__":
     # 지도 생성 및 저장
-    map = create_map()
-    map.save('/home/sftpuser/www/airtable_map.html')
+    folium_map = create_map()
+    folium_map.save('/home/sftpuser/www/airtable_map.html')
     print("지도가 airtable_map.html 파일로 저장되었습니다.")
