@@ -337,5 +337,5 @@ def create_map():
 if __name__ == "__main__":
     # 지도 생성 및 저장
     map = create_map()
-    map.save('airtable_map.html')
+    map.save('/home/sftpuser/www/airtable_map.html')
     print("지도가 airtable_map.html 파일로 저장되었습니다.")
