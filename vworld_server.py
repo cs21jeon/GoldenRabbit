@@ -11,7 +11,8 @@ load_dotenv()
 
 # Flask 앱 설정
 app = Flask(__name__)
-CORS(app)  # CORS 지원 추가
+# CORS 설정 수정
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 vworld_key = os.environ.get("VWORLD_APIKEY")
 
 # 로깅 설정

@@ -194,26 +194,45 @@ def create_map():
         print("에어테이블에서 가져온 주소 데이터가 없습니다.")
         return map
     
-    # V-World API로 주소 좌표 변환 및 마커 추가 부분을 변경
-    # Python에서 직접 API 호출하는 대신 클라이언트에서 처리하도록 JavaScript 코드 삽입
-
     # address_data를 JSON 형식으로 변환하여 HTML에 삽입
     import json
     address_data_json = json.dumps(address_data)
 
-    # JavaScript 코드를 생성하여 HTML에 삽입
+    # 수정된 JavaScript 코드
     js_code = f"""
     <script>
     // 주소 데이터를 JavaScript 변수로 저장
     const addressData = {address_data_json};
+    var mapObj = null;  // 전역 변수로 map 객체 선언
 
     // 페이지 로드 완료 시 실행
-    document.addEventListener('DOMContentLoaded', async function() {{
+    document.addEventListener('DOMContentLoaded', function() {{
+        // 지도가 로드될 때까지 기다림
+        var waitForMap = setInterval(function() {{
+            // Folium에 의해 생성된 맵 객체 찾기
+            try {{
+                // map_1은 일반적으로 Folium이 생성하는 맵 ID
+                mapObj = window['{map.get_name()}'];
+                if (mapObj) {{
+                    clearInterval(waitForMap);
+                    console.log("지도 객체를 찾았습니다!");
+                    processAddresses();
+                }}
+            }} catch (e) {{
+                console.error("지도 객체 찾기 실패:", e);
+            }}
+        }}, 500);
+    }});
+
+    // 주소 처리 함수를 별도로 분리
+    async function processAddresses() {{
         // 모든 주소에 대해 좌표 변환 및 마커 추가
         for (const addr of addressData) {{
             try {{
-                // 서버리스 함수를 통해 주소 좌표 변환
-                const response = await fetch(`/api/vworld?address=${{encodeURIComponent(addr[1])}}`);
+                // API 호출 URL을 명시적으로 지정
+                const apiUrl = `http://goldenrabbit21.cafe24.com:8000/api/vworld?address=${{encodeURIComponent(addr[1])}}`;
+                console.log(`API 요청 URL: ${{apiUrl}}`);
+                const response = await fetch(apiUrl);
                 const data = await response.json();
                 
                 // 좌표 정보가 있는지 확인
@@ -305,7 +324,7 @@ def create_map():
                         // 툴팁 내용
                         const tooltipContent = `${{dongBunji}} | ${{priceDisplay}}`;
                         
-                        // 마커 생성 및 지도에 추가
+                        // 마커 생성 및 지도에 추가 (mapObj 사용)
                         L.marker([point.y, point.x], {{
                             icon: L.AwesomeMarkers.icon({{
                                 markerColor: 'red',
@@ -316,7 +335,7 @@ def create_map():
                         }})
                         .bindPopup(L.popup({{ maxWidth: 250 }}).setContent(popupContent))
                         .bindTooltip(tooltipContent, {{ sticky: true }})
-                        .addTo(map);
+                        .addTo(mapObj);  // map 대신 mapObj 사용
                         
                         console.log(`마커 추가: ${{dongBunji}}, 좌표: ${{point.y}}, ${{point.x}}`);
                     }}
@@ -325,14 +344,20 @@ def create_map():
                 console.error(`주소 검색 실패: ${{addr[1]}}`, error);
             }}
         }}
-    }});
+    }}
     </script>
     """
 
-    # map 이름을 JS 변수로 지정
-    map.get_root().html.add_child(folium.Element(f"<script>var map = {map.get_name()};</script>"))
+    # 지도 객체를 확실하게 노출시키는 스크립트 추가
+    map.get_root().html.add_child(folium.Element(f"""
+    <script>
+    // 맵 객체를 명시적으로 전역 변수로 노출
+    window['{map.get_name()}'] = {map.get_name()};
+    </script>
+    """))
+    
+    # JavaScript 코드 추가
     map.get_root().html.add_child(folium.Element(js_code))
-
     
     return map
 
