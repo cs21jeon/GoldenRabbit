@@ -159,7 +159,7 @@ def create_map():
     """지도를 생성하고 저장하는 함수"""
     # 지도 생성 - 동작구 중심으로 설정
     folium_map = folium.Map(
-        location=[37.5, 126.95],  # 동작구 중심 좌표
+        location=[37.483, 126.974],  # 동작구 중심 좌표
         zoom_start=14,  # 동작구 정도의 면적이 보이는 확대 레벨
     )
     
@@ -397,6 +397,270 @@ function formatPrice(price) {{
     # 외부 JavaScript 파일을 로드하는 태그 추가
     folium_map.get_root().html.add_child(folium.Element("""
     <script src="/map_script.js"></script>
+    """))
+    # 디버그 스크립트 생성
+    debug_js_path = '/home/sftpuser/www/debug.js'
+    with open(debug_js_path, 'w', encoding='utf-8') as f:
+        f.write("""
+    // 디버그 정보를 기록할 요소 생성
+    function createDebugPanel() {
+    const debugPanel = document.createElement('div');
+    debugPanel.id = 'debug-panel';
+    debugPanel.style.cssText = `
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        width: 300px;
+        max-height: 400px;
+        overflow: auto;
+        background: rgba(0, 0, 0, 0.8);
+        color: #00ff00;
+        font-family: monospace;
+        font-size: 12px;
+        padding: 10px;
+        border-radius: 5px;
+        z-index: 9999;
+    `;
+    document.body.appendChild(debugPanel);
+    return debugPanel;
+    }
+
+    // 디버그 정보 기록 함수
+    function logDebug(message, data = null) {
+    let panel = document.getElementById('debug-panel');
+    if (!panel) {
+        panel = createDebugPanel();
+    }
+    
+    const timestamp = new Date().toLocaleTimeString();
+    const logItem = document.createElement('div');
+    logItem.style.borderBottom = '1px solid #333';
+    logItem.style.paddingBottom = '5px';
+    logItem.style.marginBottom = '5px';
+    
+    let logText = `[${timestamp}] ${message}`;
+    logItem.textContent = logText;
+    
+    if (data) {
+        try {
+        const dataStr = typeof data === 'object' ? JSON.stringify(data) : data.toString();
+        const dataElement = document.createElement('pre');
+        dataElement.style.marginTop = '5px';
+        dataElement.style.overflow = 'auto';
+        dataElement.style.maxHeight = '100px';
+        dataElement.style.background = '#111';
+        dataElement.style.padding = '4px';
+        dataElement.style.fontSize = '10px';
+        dataElement.textContent = dataStr;
+        logItem.appendChild(dataElement);
+        } catch (e) {
+        const errorElement = document.createElement('div');
+        errorElement.style.color = 'red';
+        errorElement.textContent = `[데이터 출력 오류: ${e.message}]`;
+        logItem.appendChild(errorElement);
+        }
+    }
+    
+    panel.appendChild(logItem);
+    panel.scrollTop = panel.scrollHeight;
+    
+    // 콘솔에도 로그 출력
+    console.log(`DEBUG: ${message}`, data || '');
+    }
+
+    // 전역 객체 검사 및 상세 정보 출력
+    function inspectGlobalObjects() {
+    logDebug('전역 객체 검사 시작');
+    
+    // 모든 전역 변수 목록
+    const allGlobals = Object.keys(window);
+    logDebug(`전역 변수 총 개수: ${allGlobals.length}`);
+    
+    // 맵 관련 전역 변수 찾기
+    const mapVars = allGlobals.filter(key => key.startsWith('map_'));
+    logDebug(`맵 관련 전역 변수(map_ 접두사): ${mapVars.length}개`, mapVars);
+    
+    // div 요소 중 map_ 접두사를 가진 요소 찾기
+    const mapElements = Array.from(document.querySelectorAll('div[id^="map_"]'));
+    logDebug(`맵 관련 DOM 요소: ${mapElements.length}개`, mapElements.map(el => el.id));
+    
+    // Leaflet 관련 객체 확인
+    if (typeof L !== 'undefined') {
+        logDebug('Leaflet 객체 사용 가능', { version: L.version });
+        
+        // Leaflet 맵 인스턴스 검색 시도
+        const leafletMaps = [];
+        mapVars.forEach(key => {
+        try {
+            const obj = window[key];
+            if (obj && typeof obj.getContainer === 'function') {
+            leafletMaps.push({
+                key: key,
+                isMap: true,
+                container: obj.getContainer().id
+            });
+            }
+        } catch (e) {
+            logDebug(`${key} 검사 중 오류: ${e.message}`);
+        }
+        });
+        
+        logDebug(`Leaflet 맵 인스턴스: ${leafletMaps.length}개`, leafletMaps);
+    } else {
+        logDebug('Leaflet 객체를 찾을 수 없음 (L is undefined)');
+    }
+    
+    // 스크립트 태그 검사
+    const scripts = Array.from(document.querySelectorAll('script'));
+    logDebug(`스크립트 태그: ${scripts.length}개`, scripts.map(s => s.src || '인라인 스크립트'));
+    
+    // 맵 객체가 될 수 있는 모든 후보 확인
+    try {
+        const potentialMapObjects = [];
+        allGlobals.forEach(key => {
+        const obj = window[key];
+        if (obj && typeof obj === 'object') {
+            try {
+            const hasMapMethods = typeof obj.setView === 'function' || 
+                                typeof obj.addLayer === 'function' || 
+                                typeof obj.getContainer === 'function';
+            
+            if (hasMapMethods) {
+                potentialMapObjects.push(key);
+            }
+            } catch (e) {}
+        }
+        });
+        
+        logDebug(`지도 객체 가능성이 있는 변수: ${potentialMapObjects.length}개`, potentialMapObjects);
+    } catch (e) {
+        logDebug(`맵 객체 후보 검색 오류: ${e.message}`);
+    }
+    }
+
+    // 오류 모니터링
+    function setupErrorMonitoring() {
+    window.onerror = function(message, source, lineno, colno, error) {
+        logDebug(`오류 발생: ${message}`, {
+        source: source,
+        line: lineno,
+        column: colno,
+        error: error ? error.stack : 'No stack trace'
+        });
+        return false; // 오류를 콘솔에도 표시
+    };
+    
+    // 모든 unhandled promise rejection 캡처
+    window.addEventListener('unhandledrejection', function(event) {
+        logDebug('Unhandled Promise Rejection', {
+        reason: event.reason,
+        stack: event.reason.stack
+        });
+    });
+    
+    logDebug('오류 모니터링 설정 완료');
+    }
+
+    // 페이지 로드 시 디버깅 시작
+    document.addEventListener('DOMContentLoaded', function() {
+    logDebug('DOM 로드 완료, 디버깅 시작');
+    setupErrorMonitoring();
+    
+    // 첫 번째 검사
+    inspectGlobalObjects();
+    
+    // 3초 후 다시 검사 (지연 로딩된 객체 확인)
+    setTimeout(function() {
+        logDebug('3초 후 재검사');
+        inspectGlobalObjects();
+    }, 3000);
+    });
+
+    logDebug('디버그 스크립트 로드 완료');
+        """)
+
+    print(f"디버그 스크립트 생성: {debug_js_path}")
+
+    # 디버그 스크립트를 먼저 로드
+    folium_map.get_root().header.add_child(folium.Element(f"""
+    <script src="/debug.js"></script>
+    """))
+
+    # map_script.js 파일의 첫 부분에 디버깅 코드 추가
+    with open('/home/sftpuser/www/map_script.js', 'r', encoding='utf-8') as f:
+        existing_code = f.read()
+
+    with open('/home/sftpuser/www/map_script.js', 'w', encoding='utf-8') as f:
+        f.write("""
+    // 디버깅 함수들 - debug.js가 로드되지 않았을 경우를 대비
+    if (typeof logDebug !== 'function') {
+    window.logDebug = function(msg, data) {
+        console.log('DEBUG:', msg, data || '');
+    };
+    }
+
+    // 맵 스크립트 초기화 시작 기록
+    logDebug('맵 스크립트 초기화 시작');
+
+    // 스코프에서 map 변수가 존재하는지 확인
+    try {
+    logDebug('현재 스코프의 map 변수:', map);
+    } catch (e) {
+    logDebug('현재 스코프에 map 변수 없음:', e.message);
+    }
+
+    // window 객체에 map 변수가 존재하는지 확인
+    logDebug('window.map 존재 여부:', window.map !== undefined);
+
+    // map으로 시작하는 모든 전역 변수 확인
+    const mapVarsAtStart = Object.keys(window).filter(k => k.startsWith('map'));
+    logDebug('맵 관련 전역 변수 (스크립트 시작):', mapVarsAtStart);
+
+    """ + existing_code)
+
+    # 외부 JavaScript 파일을 로드하는 태그 추가
+    folium_map.get_root().html.add_child(folium.Element("""
+    <script src="/map_script.js"></script>
+    """))
+
+    # 페이지 로드 시 실행될 디버그 코드 추가
+    folium_map.get_root().html.add_child(folium.Element("""
+    <script>
+    // 페이지 로드 후 map 변수 확인
+    document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(function() {
+        try {
+        console.log('map 변수 확인:', map); // 일부러 오류를 발생시켜 stack trace 확인
+        } catch (e) {
+        console.error('map 변수 접근 오류:', e);
+        
+        // 오류 위치 확인
+        const stackLines = e.stack.split('\\n');
+        console.log('오류 스택:', stackLines);
+        
+        // 오류 발생 소스 파일 확인
+        if (stackLines.length > 1) {
+            const sourceMatch = stackLines[1].match(/at (.+)$/);
+            if (sourceMatch) {
+            console.log('오류 발생 위치:', sourceMatch[1]);
+            }
+        }
+        
+        // 디버그 패널에 표시 (debug.js 로드된 경우)
+        if (typeof logDebug === 'function') {
+            logDebug('map 변수 접근 시 오류 발생', {
+            message: e.message,
+            stack: e.stack
+            });
+            
+            // 모든 스크립트 태그 검사
+            const scripts = Array.from(document.querySelectorAll('script'));
+            logDebug('모든 스크립트 태그:', scripts.map(s => s.src || '인라인 스크립트'));
+        }
+        }
+    }, 2000); // 페이지 로드 후 2초 후 실행
+    });
+    </script>
     """))
     
     return folium_map
