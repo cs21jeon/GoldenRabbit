@@ -163,18 +163,30 @@ def submit_inquiry():
 @app.route('/api/property-list', methods=['GET'])
 def get_property_list():
     airtable_key = os.environ.get("AIRTABLE_API_KEY")
-    base_id = os.environ.get("AIRTABLE_BASE_ID")
+    base_id = os.environ.get("AIRTABLE_BASE_ID") 
     table_id = os.environ.get("AIRTABLE_TABLE_ID")
-    view_id = os.environ.get("AIRTABLE_VIEW_ID", "viweFlrK1v4aXqYH8")
+    view_id = os.environ.get("AIRTABLE_VIEW_ID")
     
+    if not airtable_key:
+        return jsonify({"error": "Airtable API key not set"}), 500
+        
     headers = {
         "Authorization": f"Bearer {airtable_key}"
     }
-    url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
-
+    
+    # 뷰 ID를 URL 파라미터로 추가
+    url = f"https://api.airtable.com/v0/{base_id}/{table_id}?view={view_id}"
+    
     try:
         response = requests.get(url, headers=headers)
-        return jsonify(response.json()), response.status_code
+        
+        if response.status_code != 200:
+            return jsonify({
+                "error": "Airtable data fetch failed",
+                "details": response.text
+            }), response.status_code
+            
+        return jsonify(response.json()), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
