@@ -120,6 +120,46 @@ def vworld_wms():
         logger.error(f"WMS proxy error: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/submit-inquiry', methods=['POST'])
+def submit_inquiry():
+    data = request.json
+
+    # Airtable API 설정
+    airtable_api_key = os.environ.get("AIRTABLE_API_KEY")
+    base_id = os.environ.get("AIRTABLE_BASE_ID", "appBm845MhVkkaBD1")
+    table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblgik4xDNNPb8WUE")
+
+    if not airtable_api_key:
+        return jsonify({"error": "Airtable API key not set"}), 500
+
+    # Airtable에 보낼 데이터 구성
+    payload = {
+        "fields": {
+            "매물종류": data.get("propertyType"),
+            "전화번호": data.get("phone"),
+            "이메일": data.get("email"),
+            "문의내용": data.get("message")
+        }
+    }
+
+    headers = {
+        "Authorization": f"Bearer {airtable_api_key}",
+        "Content-Type": "application/json"
+    }
+
+    url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code in [200, 201]:
+            return jsonify({"status": "success"}), 200
+        else:
+            return jsonify({
+                "error": "Airtable submission failed",
+                "details": response.text
+            }), response.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/health')
 def health_check():
     """서버 상태 확인용 엔드포인트"""
