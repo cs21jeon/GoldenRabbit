@@ -160,6 +160,7 @@ def submit_inquiry():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route('/health')
 def health_check():
     """서버 상태 확인용 엔드포인트"""
