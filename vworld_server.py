@@ -160,19 +160,16 @@ def submit_inquiry():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/property-list')
-def fetch_property_list():
-    import os
+@app.route('/api/property-list', methods=['GET'])
+def get_property_list():
+    airtable_key = os.environ.get("AIRTABLE_API_KEY")
     base_id = os.environ.get("AIRTABLE_BASE_ID")
     table_id = os.environ.get("AIRTABLE_TABLE_ID")
-    airtable_api_key = os.environ.get("AIRTABLE_API_KEY")
-
-    url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
 
     headers = {
-        "Authorization": f"Bearer {airtable_api_key}",
-        "Content-Type": "application/json"
+        "Authorization": f"Bearer {airtable_key}"
     }
+    url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
 
     try:
         response = requests.get(url, headers=headers)
