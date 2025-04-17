@@ -268,7 +268,7 @@ async function processAddresses() {{
     for (const addr of addressData) {{
         try {{
             // API 호출 URL
-            const apiUrl = `http://goldenrabbit21.cafe24.com:8000/api/vworld?address=${{encodeURIComponent(addr[1])}}`;
+            const apiUrl = `/api/vworld?address=${{encodeURIComponent(addr[1])}}`;
             console.log(`좌표 요청: ${{addr[1]}}`);
             
             const response = await fetch(apiUrl);
