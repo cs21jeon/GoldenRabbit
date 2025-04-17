@@ -123,21 +123,39 @@ def vworld_wms():
 @app.route('/api/submit-inquiry', methods=['POST'])
 def submit_inquiry():
     data = request.json
+    logger.info(f"Received inquiry submission: {data}")
 
+    # 매물 종류 매핑 - 에어테이블에 실제 존재하는 옵션으로 변환
+    property_type_map = {
+        'house': '단독/다가구',
+        'mixed': '상가주택', 
+        'commercial': '상업용빌딩',
+        'land': '재건축/토지',
+        'sell': '매물접수'
+    }
+
+    # 받은 propertyType을 에어테이블에 있는 값으로 매핑
+    property_type = property_type_map.get(data.get("propertyType"), "기타")
+    
     # 구분된 Airtable API 설정
     airtable_inquiry_key = os.environ.get("AIRTABLE_INQUIRY_KEY")
     base_id = os.environ.get("AIRTABLE_INQUIRY_BASE_ID", "appBm845MhVkkaBD1")
     table_id = os.environ.get("AIRTABLE_INQUIRY_TABLE_ID", "tblgik4xDNNPb8WUE")
 
     if not airtable_inquiry_key:
+        logger.error("AIRTABLE_INQUIRY_KEY not set")
         return jsonify({"error": "Inquiry API key not set"}), 500
 
     payload = {
-        "fields": {
-            "매물종류": data.get("propertyType"),
-            "연락처": data.get("phone"),
-            "이메일": data.get("email"),
-            "문의사항": data.get("message")
+        "records": [
+            {
+                "fields": {
+                    "매물종류": property_type,
+                    "연락처": data.get("phone"),
+                    "이메일": data.get("email"),
+                    "문의사항": data.get("message")
+                }
+            }
         }
     }
 
