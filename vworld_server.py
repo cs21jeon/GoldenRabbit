@@ -124,15 +124,14 @@ def vworld_wms():
 def submit_inquiry():
     data = request.json
 
-    # Airtable API 설정
-    airtable_api_key = os.environ.get("AIRTABLE_API_KEY")
+    # 구분된 Airtable API 설정
+    airtable_inquiry_key = os.environ.get("AIRTABLE_INQUIRY_KEY")
     base_id = os.environ.get("AIRTABLE_BASE_ID", "appBm845MhVkkaBD1")
     table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblgik4xDNNPb8WUE")
 
-    if not airtable_api_key:
-        return jsonify({"error": "Airtable API key not set"}), 500
+    if not airtable_inquiry_key:
+        return jsonify({"error": "Inquiry API key not set"}), 500
 
-    # Airtable에 보낼 데이터 구성
     payload = {
         "fields": {
             "매물종류": data.get("propertyType"),
@@ -143,7 +142,7 @@ def submit_inquiry():
     }
 
     headers = {
-        "Authorization": f"Bearer {airtable_api_key}",
+        "Authorization": f"Bearer {airtable_inquiry_key}",
         "Content-Type": "application/json"
     }
 
@@ -159,6 +158,7 @@ def submit_inquiry():
             }), response.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/property-list', methods=['GET'])
 def get_property_list():
