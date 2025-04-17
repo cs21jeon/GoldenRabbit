@@ -135,9 +135,9 @@ def submit_inquiry():
     payload = {
         "fields": {
             "매물종류": data.get("propertyType"),
-            "전화번호": data.get("phone"),
+            "연락처": data.get("phone"),
             "이메일": data.get("email"),
-            "문의내용": data.get("message")
+            "문의사항": data.get("message")
         }
     }
 
