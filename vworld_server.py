@@ -165,7 +165,8 @@ def get_property_list():
     airtable_key = os.environ.get("AIRTABLE_API_KEY")
     base_id = os.environ.get("AIRTABLE_BASE_ID")
     table_id = os.environ.get("AIRTABLE_TABLE_ID")
-
+    view_id = os.environ.get("AIRTABLE_VIEW_ID", "viweFlrK1v4aXqYH8")
+    
     headers = {
         "Authorization": f"Bearer {airtable_key}"
     }
