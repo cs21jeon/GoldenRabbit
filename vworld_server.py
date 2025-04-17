@@ -126,8 +126,8 @@ def submit_inquiry():
 
     # 구분된 Airtable API 설정
     airtable_inquiry_key = os.environ.get("AIRTABLE_INQUIRY_KEY")
-    base_id = os.environ.get("AIRTABLE_BASE_ID", "appBm845MhVkkaBD1")
-    table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblgik4xDNNPb8WUE")
+    base_id = os.environ.get("AIRTABLE_INQUIRY_BASE_ID", "appBm845MhVkkaBD1")
+    table_id = os.environ.get("AIRTABLE_INQUIRY_TABLE_ID", "tblgik4xDNNPb8WUE")
 
     if not airtable_inquiry_key:
         return jsonify({"error": "Inquiry API key not set"}), 500
@@ -148,7 +148,16 @@ def submit_inquiry():
 
     url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
     try:
+        # 디버깅 로그 추가
+        print(f"Sending to Airtable: {url}")
+        print(f"Payload: {payload}")
+        
         response = requests.post(url, json=payload, headers=headers)
+
+        # 응답 디버깅
+        print(f"Airtable response status: {response.status_code}")
+        print(f"Airtable response: {response.text}")
+        
         if response.status_code in [200, 201]:
             return jsonify({"status": "success"}), 200
         else:
@@ -158,7 +167,6 @@ def submit_inquiry():
             }), response.status_code
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/api/property-list', methods=['GET'])
 def get_property_list():
