@@ -156,6 +156,7 @@ def submit_inquiry():
                     "문의사항": data.get("message")
                 }
             }
+        ]
     }
 
     headers = {
