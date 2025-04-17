@@ -5,7 +5,7 @@ export default async function handler(req, res) {
     try {
       const response = await fetch(`https://api.airtable.com/v0/${base_id}/${table_id}`, {
         headers: {
-          'Authorization': `Bearer ${process.env.AIRTABLE_TOKEN}`,
+          'Authorization': `Bearer ${process.env.AIRTABLE_API_KEY}`,
           'Content-Type': 'application/json'
         }
       });
