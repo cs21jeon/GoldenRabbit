@@ -165,14 +165,14 @@ def create_map():
     
     # 기본 타일 레이어 추가 - API 키 노출 방지를 위해 프록시 URL 사용
     folium.TileLayer(
-        tiles='http://goldenrabbit21.cafe24.com:8000/api/vtile?z={z}&y={y}&x={x}',
+        tiles='https://goldenrabbit.biz/api/vtile?z={z}&y={y}&x={x}',
         attr='공간정보 오픈플랫폼(브이월드)',
         name='브이월드 배경지도',
     ).add_to(folium_map)
     
     # WMS 타일 레이어 추가 - API 키 노출 방지를 위해 프록시 URL 사용
     folium.WmsTileLayer(
-        url='http://goldenrabbit21.cafe24.com:8000/api/wms?',
+        url='https://goldenrabbit.biz/api/wms?',
         layers='lt_c_landinfobasemap',
         request='GetMap',
         version='1.3.0',
