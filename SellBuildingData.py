@@ -141,72 +141,72 @@ def create_map():
         print("에어테이블에서 가져온 주소 데이터가 없습니다.")
         return folium_map
 
-# 기존 folium.Marker 부분을 다음 코드로 대체
-for addr in address_data:
-    name, address, price, status, field_values = addr
-    lat, lon = geocode_address(address)
-    if lat is None or lon is None:
-        continue
-
-    price_display = f"{price:,}만원" if isinstance(price, int) and price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.') if isinstance(price, int) else (price or "가격정보 없음")
-
-    popup_html = f"<b>{name}</b><br>매가: {price_display}<br>"
-    if field_values.get('토지면적(㎡)'):
-        try:
-            sqm = float(field_values['토지면적(㎡)'])
-            pyeong = round(sqm / 3.3058)
-            popup_html += f"대지: {pyeong}평 ({sqm}㎡)<br>"
-        except:
-            pass
-    if field_values.get('층수'):
-        popup_html += f"층수: {field_values['층수']}<br>"
-    if field_values.get('주용도'):
-        popup_html += f"용도: {field_values['주용도']}<br>"
+    # 기존 folium.Marker 부분을 다음 코드로 대체
+    for addr in address_data:
+        name, address, price, status, field_values = addr
+        lat, lon = geocode_address(address)
+        if lat is None or lon is None:
+            continue
     
-    # 말풍선 스타일의 마커 HTML
-    bubble_html = f"""
-    <div style="
-        background-color: #fff;
-        border: 2px solid #e38000;
-        border-radius: 6px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-        padding: 5px 10px;
-        font-size: 12px;
-        font-weight: bold;
-        color: #e38000;
-        white-space: nowrap;
-        position: relative;
-    ">
-        {price_display}
+        price_display = f"{price:,}만원" if isinstance(price, int) and price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.') if isinstance(price, int) else (price or "가격정보 없음")
+    
+        popup_html = f"<b>{name}</b><br>매가: {price_display}<br>"
+        if field_values.get('토지면적(㎡)'):
+            try:
+                sqm = float(field_values['토지면적(㎡)'])
+                pyeong = round(sqm / 3.3058)
+                popup_html += f"대지: {pyeong}평 ({sqm}㎡)<br>"
+            except:
+                pass
+        if field_values.get('층수'):
+            popup_html += f"층수: {field_values['층수']}<br>"
+        if field_values.get('주용도'):
+            popup_html += f"용도: {field_values['주용도']}<br>"
+        
+        # 말풍선 스타일의 마커 HTML
+        bubble_html = f"""
         <div style="
-            position: absolute;
-            bottom: -8px;
-            left: 50%;
-            margin-left: -8px;
-            width: 0;
-            height: 0;
-            border-left: 8px solid transparent;
-            border-right: 8px solid transparent;
-            border-top: 8px solid #e38000;
-        "></div>
-    </div>
-    """
+            background-color: #fff;
+            border: 2px solid #e38000;
+            border-radius: 6px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            padding: 5px 10px;
+            font-size: 12px;
+            font-weight: bold;
+            color: #e38000;
+            white-space: nowrap;
+            position: relative;
+        ">
+            {price_display}
+            <div style="
+                position: absolute;
+                bottom: -8px;
+                left: 50%;
+                margin-left: -8px;
+                width: 0;
+                height: 0;
+                border-left: 8px solid transparent;
+                border-right: 8px solid transparent;
+                border-top: 8px solid #e38000;
+            "></div>
+        </div>
+        """
+        
+        # DivIcon으로 말풍선 마커 생성
+        icon = folium.DivIcon(
+            html=bubble_html,
+            icon_size=(100, 40),  # 아이콘 크기 조정 (필요에 따라)
+            icon_anchor=(50, 40)  # 앵커 위치 조정 (필요에 따라)
+        )
+        
+        # 마커 추가 (팝업은 그대로 유지)
+        folium.Marker(
+            location=[lat, lon],
+            popup=folium.Popup(popup_html, max_width=250),
+            icon=icon,
+            tooltip=f"{name}"
+        ).add_to(folium_map)
     
-    # DivIcon으로 말풍선 마커 생성
-    icon = folium.DivIcon(
-        html=bubble_html,
-        icon_size=(100, 40),  # 아이콘 크기 조정 (필요에 따라)
-        icon_anchor=(50, 40)  # 앵커 위치 조정 (필요에 따라)
-    )
-    
-    # 마커 추가 (팝업은 그대로 유지)
-    folium.Marker(
-        location=[lat, lon],
-        popup=folium.Popup(popup_html, max_width=250),
-        icon=icon,
-        tooltip=f"{name}"
-    ).add_to(folium_map)
-
     return folium_map
 
 if __name__ == "__main__":
