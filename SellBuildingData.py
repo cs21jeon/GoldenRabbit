@@ -1,6 +1,8 @@
 import folium
 import requests
 import os
+import time
+from datetime import datetime
 from dotenv import load_dotenv
 
 # 환경 변수 로드
@@ -402,7 +404,20 @@ function formatPrice(price) {{
     return folium_map
 
 if __name__ == "__main__":
-    # 지도 생성 및 저장
-    folium_map = create_map()
-    folium_map.save('/home/sftpuser/www/airtable_map.html')
-    print("지도가 airtable_map.html 파일로 저장되었습니다.")
+    # 캐시 파일 경로
+    cache_file = '/home/sftpuser/www/airtable_map.html'
+    # 캐시 유효 기간 (24시간)
+    cache_time = 86400
+    
+    # 현재 시간
+    current_time = time.time()
+    
+    # 파일이 존재하고 24시간 이내에 생성된 경우 새로 생성하지 않음
+    if os.path.exists(cache_file) and (current_time - os.path.getmtime(cache_file) < cache_time):
+        print(f"캐시된 지도를 사용합니다. (생성 시간: {datetime.fromtimestamp(os.path.getmtime(cache_file))})")
+    else:
+        print("새 지도를 생성합니다...")
+        # 지도 생성 및 저장
+        folium_map = create_map()
+        folium_map.save(cache_file)
+        print(f"지도가 {cache_file} 파일로 저장되었습니다.")
