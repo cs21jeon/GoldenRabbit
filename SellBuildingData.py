@@ -171,21 +171,24 @@ def create_map():
             border-radius: 6px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
             padding: 3px 6px;
-            font-size: 14px;
+            font-size: 10px;
             font-weight: bold;
             color: #e38000;
             white-space: nowrap;
             text-align: center;
             position: relative;
-            display: inline-block; /* 컨텐츠 크기에 맞게 요소 크기 조절 */
+            display: inline-block;
+            max-width: 70px;
+            transform: translateX(-50%); /* 중요: 말풍선을 왼쪽으로 50% 이동 */
+            left: 50%; /* 마커 위치를 기준점으로 설정 */
         }
+        
         .price-bubble:after {
             content: '';
             position: absolute;
             bottom: -8px;
-            left: 50%;
-            transform: translateX(-50%); /* 정확히 중앙에 위치하도록 조정 */
-            margin-left: 0; /* 변경: 기존 margin-left: -8px; 제거 */
+            left: 50%; /* 화살표를 말풍선 중앙에 위치 */
+            margin-left: -8px;
             width: 0;
             height: 0;
             border-left: 8px solid transparent;
