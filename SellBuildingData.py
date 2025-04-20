@@ -170,7 +170,7 @@ def create_map():
             border: 2px solid #e38000;
             border-radius: 6px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            padding: 3px 6px;
+            padding: 2px 3px;
             font-size: 10px;
             font-weight: bold;
             color: #e38000;
@@ -179,7 +179,7 @@ def create_map():
             position: relative;
             display: inline-block;
             max-width: 70px;
-            transform: translateX(-50%); /* 중요: 말풍선을 왼쪽으로 50% 이동 */
+            transform: translateX(-50%, -10px); /* 중요: 말풍선을 왼쪽으로 50% 이동 */
             left: 50%; /* 마커 위치를 기준점으로 설정 */
         }
         
@@ -194,6 +194,7 @@ def create_map():
             border-left: 8px solid transparent;
             border-right: 8px solid transparent;
             border-top: 8px solid #e38000;
+            transform: translateY(-5px); /* 화살표를 위로 이동 */
         }
         </style>
         """))
