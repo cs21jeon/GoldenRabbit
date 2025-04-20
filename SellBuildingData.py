@@ -170,13 +170,14 @@ def create_map():
             border: 2px solid #e38000;
             border-radius: 6px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            padding: 5px 10px;
-            font-size: 12px;
+            padding: 3px 6px;
+            font-size: 14px;
             font-weight: bold;
             color: #e38000;
             white-space: nowrap;
             text-align: center;
             position: relative;
+            display: inline-block; /* 컨텐츠 크기에 맞게 요소 크기 조절 */
         }
         .price-bubble:after {
             content: '';
