@@ -175,8 +175,12 @@ def create_map():
             font-weight: bold;
             color: #e38000;
             white-space: nowrap;
-            text-align: center;
-            position: relative;
+            text-align: center;        
+            /* 위치 관련 추가 */
+            position: absolute;          /* 부모가 relative여야 함 */
+            left: 50%;                   /* 부모 기준 가운데 */
+            transform: translateX(-50%); /* 자기 자신 너비 절반만큼 왼쪽 이동 */
+            width: 70px;                /* 원하는 폭 설정 */
         }
         .price-bubble:after {
             content: '';
