@@ -184,7 +184,8 @@ def create_map():
             position: absolute;
             bottom: -8px;
             left: 50%;
-            margin-left: -8px;
+            transform: translateX(-50%); /* 정확히 중앙에 위치하도록 조정 */
+            margin-left: 0; /* 변경: 기존 margin-left: -8px; 제거 */
             width: 0;
             height: 0;
             border-left: 8px solid transparent;
