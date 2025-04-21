@@ -117,7 +117,7 @@ def geocode_address(address):
     return None, None
 
 def create_map():
-    folium_map = folium.Map(location=[37.4765, 126.9816], zoom_start=15)
+    folium_map = folium.Map(location=[37.4834458778777, 126.970207234818], zoom_start=15)
     folium.TileLayer(
         tiles='https://goldenrabbit.biz/api/vtile?z={z}&y={y}&x={x}',
         attr='공간정보 오픈플랫폼(브이월드)',
