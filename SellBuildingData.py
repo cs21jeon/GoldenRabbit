@@ -223,8 +223,18 @@ if __name__ == "__main__":
     cache_time = 86400
     current_time = time.time()
 
-    if os.path.exists(cache_file) and (current_time - os.path.getmtime(cache_file) < cache_time):
-        print(f"캐시된 지도를 사용합니다. (생성 시간: {datetime.fromtimestamp(os.path.getmtime(cache_file))})")
+    from datetime import time as dtime, timedelta, timezone
+
+    # 서울 타임존
+    KST = timezone(timedelta(hours=9))
+
+    # 오늘 새벽 3시
+    now = datetime.now(KST)
+    today_3am = datetime.combine(now.date(), dtime(3, 0), tzinfo=KST)
+    map_mtime = datetime.fromtimestamp(os.path.getmtime(cache_file), KST) if os.path.exists(cache_file) else None
+
+    if map_mtime and map_mtime >= today_3am:
+        print(f"캐시된 지도를 사용합니다. (생성 시간: {map_mtime})")
     else:
         print("새 지도를 생성합니다...")
         folium_map = create_map()
