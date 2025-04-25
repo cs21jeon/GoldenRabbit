@@ -139,43 +139,40 @@ def create_map():
     folium_map.get_root().header.add_child(folium.Element("""
     <style>
     .custom-popup {
+        position: relative;
+        background-color: transparent;
+        padding: 0;
+        max-width: 300px;
         font-family: 'Noto Sans KR', sans-serif;
         font-size: 13px;
-        padding: 12px;
-        background-color: #fff;
-        border: 2px solid #e38000;
-        border-radius: 10px;
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-        line-height: 1.5;
-        max-width: 300px;
     }
-    .price-bubble {
+
+    .popup-content {
         background-color: #fff;
-        border: 2px solid #e38000;
-        border-radius: 6px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-        padding: 3px 6px;
-        font-size: 12px;
+        padding: 8px 10px; /* 여백 절반으로 줄임 */
+        border-radius: 10px;
+        line-height: 1.4;
+        box-shadow: 0 0 0 2px #e38000; /* 내부 말풍선 테두리 제거, 외곽만 강조 */
+        position: relative;
+    }
+
+    .popup-content .close-btn {
+        position: absolute;
+        top: 4px;
+        right: 6px;
+        font-size: 14px;
+        font-weight: bold;
+        color: #888;
+        cursor: pointer;
+    }
+
+    .popup-content .close-btn:hover {
+        color: #222;
+    }
+
+    .popup-content .price {
         font-weight: bold;
         color: #e38000;
-        white-space: nowrap;
-        text-align: center;
-        position: absolute;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 70px;
-    }
-    .price-bubble:after {
-        content: '';
-        position: absolute;
-        bottom: -8px;
-        left: 50%;
-        margin-left: -8px;
-        width: 0;
-        height: 0;
-        border-left: 8px solid transparent;
-        border-right: 8px solid transparent;
-        border-top: 8px solid #e38000;
     }
     </style>
     """))
@@ -203,11 +200,14 @@ def create_map():
 
         popup_html = f"""
         <div class="custom-popup">
-            <div style="font-size:14px; font-weight:bold; margin-bottom:6px;">{name}</div>
-            <div><b>매가:</b> <span style="color:#e38000;">{price_display}</span></div>
-            {'<div><b>대지면적:</b> ' + str(field_values.get('토지면적(㎡)', '정보 없음')) + '㎡</div>' if field_values.get('토지면적(㎡)') else ''}
-            {'<div><b>층수:</b> ' + str(field_values.get('층수')) + '</div>' if field_values.get('층수') else ''}
-            {'<div><b>용도:</b> ' + str(field_values.get('주용도')) + '</div>' if field_values.get('주용도') else ''}
+            <div class="popup-content">
+                <div class="close-btn" onclick="this.closest('.leaflet-popup').style.display='none'">×</div>
+                <div style="font-size:14px; font-weight:bold; margin-bottom:4px;">{name}</div>
+                <div><b>매가:</b> <span class="price">{price_display}</span></div>
+                {'<div><b>대지면적:</b> ' + str(field_values.get('토지면적(㎡)', '정보 없음')) + '㎡</div>' if field_values.get('토지면적(㎡)') else ''}
+                {'<div><b>층수:</b> ' + str(field_values.get('층수')) + '</div>' if field_values.get('층수') else ''}
+                {'<div><b>용도:</b> ' + str(field_values.get('주용도')) + '</div>' if field_values.get('주용도') else ''}
+            </div>
         </div>
         """
 
