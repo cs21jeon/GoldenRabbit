@@ -135,6 +135,73 @@ def create_map():
     ).add_to(folium_map)
     folium.LayerControl().add_to(folium_map)
 
+    # CSS 스타일 추가
+    folium_map.get_root().header.add_child(folium.Element("""
+    <style>
+    /* 가격 말풍선 스타일 */
+    .price-bubble {
+        background-color: #fff;
+        border: 2px solid #e38000;
+        border-radius: 6px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        padding: 3px 6px;
+        font-size: 13px;
+        font-weight: bold;
+        color: #e38000;
+        white-space: nowrap;
+        text-align: center;
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 70px;
+    }
+    .price-bubble:after {
+        content: '';
+        position: absolute;
+        bottom: -8px;
+        left: 50%;
+        margin-left: -8px;
+        width: 0;
+        height: 0;
+        border-left: 8px solid transparent;
+        border-right: 8px solid transparent;
+        border-top: 8px solid #e38000;
+    }
+    
+    /* 팝업창 스타일 */
+    .leaflet-popup-content-wrapper {
+        border-radius: 8px;
+        box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+        padding: 0;
+    }
+    .leaflet-popup-content {
+        margin: 8px 10px;  /* 여백 줄임 */
+        font-size: 14px;   /* 글자 크기 키움 */
+        line-height: 1.5;
+    }
+    .leaflet-popup-tip {
+        box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+    }
+    .popup-content {
+        font-family: 'Noto Sans KR', sans-serif;
+    }
+    .popup-title {
+        font-size: 16px;
+        font-weight: bold;
+        margin-bottom: 6px;
+        color: #333;
+    }
+    .popup-info {
+        margin-top: 2px;
+        color: #444;
+    }
+    </style>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    """))
+
     address_data = get_airtable_data()
     if not address_data:
         print("에어테이블에서 가져온 주소 데이터가 없습니다.")
@@ -148,51 +215,28 @@ def create_map():
 
         price_display = f"{price:,}만원" if isinstance(price, int) and price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.') if isinstance(price, int) else (price or "가격정보 없음")
 
-        popup_html = f"<b>{name}</b><br>매가: {price_display}<br>"
+        # 개선된 팝업 HTML 구조
+        popup_html = f"""
+        <div class="popup-content">
+            <div class="popup-title">{name}</div>
+            <div class="popup-info">매가: {price_display}</div>
+        """
+        
         if field_values.get('토지면적(㎡)'):
             try:
                 sqm = float(field_values['토지면적(㎡)'])
                 pyeong = round(sqm / 3.3058)
-                popup_html += f"대지: {pyeong}평 ({sqm}㎡)<br>"
+                popup_html += f'<div class="popup-info">대지: {pyeong}평 ({sqm}㎡)</div>'
             except:
                 pass
+                
         if field_values.get('층수'):
-            popup_html += f"층수: {field_values['층수']}<br>"
+            popup_html += f'<div class="popup-info">층수: {field_values["층수"]}</div>'
+            
         if field_values.get('주용도'):
-            popup_html += f"용도: {field_values['주용도']}<br>"
-
-        folium_map.get_root().header.add_child(folium.Element("""
-        <style>
-        .price-bubble {
-            background-color: #fff;
-            border: 2px solid #e38000;
-            border-radius: 6px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            padding: 3px 6px;
-            font-size: 12px;
-            font-weight: bold;
-            color: #e38000;
-            white-space: nowrap;
-            text-align: center;
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 70px;
-        }
-        .price-bubble:after {
-            content: '';
-            position: absolute;
-            bottom: -8px;
-            left: 50%;
-            margin-left: -8px;
-            width: 0;
-            height: 0;
-            border-left: 8px solid transparent;
-            border-right: 8px solid transparent;
-            border-top: 8px solid #e38000;
-        }
-        </style>
-        """))
+            popup_html += f'<div class="popup-info">용도: {field_values["주용도"]}</div>'
+            
+        popup_html += "</div>"
 
         bubble_html = f'<div class="price-bubble">{price_display}</div>'
         icon = folium.DivIcon(
@@ -202,39 +246,11 @@ def create_map():
             class_name="empty"
         )
 
-        escaped_name = json.dumps(name)[1:-1]
-        tooltip_script = f"""
-<script>
-document.addEventListener('DOMContentLoaded', function() {{
-  if (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches) {{
-    var tooltips = document.querySelectorAll('.leaflet-tooltip');
-    tooltips.forEach(function(tooltip) {{
-      tooltip.style.display = 'none';
-    }});
-
-    var observer = new MutationObserver(function(mutations) {{
-      mutations.forEach(function(mutation) {{
-        if (mutation.addedNodes) {{
-          mutation.addedNodes.forEach(function(node) {{
-            if (node.classList && node.classList.contains('leaflet-tooltip')) {{
-              node.style.display = 'none';
-            }}
-          }});
-        }}
-      }});
-    }});
-
-    observer.observe(document.body, {{ childList: true, subtree: true }});
-  }}
-}});
-</script>
-        """
-
         folium.Marker(
             location=[lat, lon],
             popup=folium.Popup(popup_html, max_width=250),
             icon=icon
-        ).add_to(folium_map).get_root().html.add_child(folium.Element(tooltip_script))
+        ).add_to(folium_map)
 
     return folium_map
 
