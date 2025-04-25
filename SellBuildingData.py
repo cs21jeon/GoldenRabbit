@@ -64,6 +64,7 @@ def get_airtable_data():
 
         address_data = []
         for record in all_records:
+            record_id = record.get('id')  # 레코드 ID 저장
             fields = record.get('fields', {})
             address = fields.get(address_field)
             name = address
@@ -88,7 +89,7 @@ def get_airtable_data():
                         price = int(price)
                 except:
                     pass
-                address_data.append([name, address, price, status, field_values])
+                address_data.append([name, address, price, status, field_values, record_id])  # record_id 추가
         return address_data
     except Exception as e:
         print(f"API 요청 중 예외 발생: {str(e)}")
@@ -195,6 +196,23 @@ def create_map():
         margin-top: 2px;
         color: #444;
     }
+    /* 상세내역 보기 링크 스타일 */
+    .detail-link {
+        display: block;
+        margin-top: 10px;
+        padding: 5px;
+        background-color: #f5f5f5;
+        border-top: 1px solid #e0e0e0;
+        text-align: center;
+        font-weight: bold;
+        color: #e38000;
+        cursor: pointer;
+        text-decoration: none;
+        border-radius: 0 0 6px 6px;
+    }
+    .detail-link:hover {
+        background-color: #e6e6e6;
+    }
     </style>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -208,13 +226,16 @@ def create_map():
         return folium_map
 
     for addr in address_data:
-        name, address, price, status, field_values = addr
+        name, address, price, status, field_values, record_id = addr  # record_id 추가
         lat, lon = geocode_address(address)
         if lat is None or lon is None:
             continue
 
         price_display = f"{price:,}만원" if isinstance(price, int) and price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.') if isinstance(price, int) else (price or "가격정보 없음")
 
+        # 에어테이블 레코드 링크 생성
+        airtable_record_url = f"https://airtable.com/{base_id}/{table_id}/viwyV15T4ihMpbDbr/{record_id}?blocks=hide"
+        
         # 개선된 팝업 HTML 구조
         popup_html = f"""
         <div class="popup-content">
@@ -235,7 +256,9 @@ def create_map():
             
         if field_values.get('주용도'):
             popup_html += f'<div class="popup-info">용도: {field_values["주용도"]}</div>'
-            
+        
+        # 상세내역 보기 링크 추가
+        popup_html += f'<a href="{airtable_record_url}" target="_blank" class="detail-link">상세내역보기-클릭</a>'
         popup_html += "</div>"
 
         bubble_html = f'<div class="price-bubble">{price_display}</div>'
