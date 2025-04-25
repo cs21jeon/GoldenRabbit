@@ -1,10 +1,12 @@
 from flask import Flask, request, jsonify, make_response
 import requests
 import os
+import json
 from dotenv import load_dotenv
 from flask_cors import CORS
 import logging
 from functools import lru_cache
+import anthropic  # Claude API를 위한 패키지 추가
 
 # 환경 변수 로드
 load_dotenv()
@@ -17,6 +19,10 @@ vworld_key = os.environ.get("VWORLD_APIKEY")
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Anthropic API 키 설정
+anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
+claude_client = anthropic.Anthropic(api_key=anthropic_api_key)
 
 # 캐싱 적용 (최근 100개 요청 캐싱)
 @lru_cache(maxsize=100)
@@ -215,6 +221,119 @@ def get_property_list():
         return jsonify(response.json()), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# AI 물건 검색 기능 추가
+@app.route('/api/property-search', methods=['POST'])
+def property_search():
+    try:
+        # Anthropic API 키 확인
+        if not anthropic_api_key:
+            logger.error("ANTHROPIC_API_KEY environment variable is not set")
+            return jsonify({"error": "AI API key not configured"}), 500
+            
+        # 사용자 입력 받기
+        data = request.json
+        location = data.get('location', '')
+        price_range = data.get('price_range', '')
+        investment = data.get('investment', '')
+        expected_yield = data.get('expected_yield', '')
+        
+        logger.info(f"AI property search request: location={location}, price_range={price_range}, investment={investment}, expected_yield={expected_yield}")
+        
+        # Airtable에서 매물 데이터 가져오기
+        airtable_key = os.environ.get("AIRTABLE_API_KEY")
+        base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
+        table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
+        view_id = os.environ.get("AIRTABLE_VIEW_ID")
+        
+        if not airtable_key:
+            return jsonify({"error": "Airtable API key not set"}), 500
+            
+        headers = {
+            "Authorization": f"Bearer {airtable_key}"
+        }
+        
+        # 뷰 ID를 URL 파라미터로 추가
+        url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
+        if view_id:
+            url += f"?view={view_id}"
+        
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            logger.error(f"Failed to fetch properties: {response.text}")
+            return jsonify({"error": "Failed to fetch property data"}), 500
+        
+        # 에어테이블 데이터 처리
+        properties_data = response.json()
+        properties = []
+        
+        for record in properties_data.get('records', []):
+            fields = record.get('fields', {})
+            
+            # 매물 정보 구조화 (필요한 필드만 추출)
+            property_info = {
+                "id": record.get('id', ''),
+                "name": fields.get('건물명', ''),
+                "address": fields.get('주소', ''),
+                "price": fields.get('매매가', ''),
+                "monthly_income": fields.get('월소득', ''),
+                "yield": fields.get('수익률', ''),
+                "property_type": fields.get('건물종류', ''),
+                "area": fields.get('대지면적', '')
+            }
+            properties.append(property_info)
+        
+        # 데이터 양이 너무 많으면 제한
+        if len(properties) > 15:
+            logger.info(f"Limiting properties from {len(properties)} to 15")
+            properties = properties[:15]
+        
+        # Claude에 전송할 프롬프트 구성
+        prompt = f"""
+        다음은 부동산 매물 목록입니다:
+        {json.dumps(properties, ensure_ascii=False, indent=2)}
+        
+        사용자의 검색 조건:
+        - 지역: {location}
+        - 희망매매가: {price_range}
+        - 실투자금: {investment}
+        - 희망투자수익률: {expected_yield}
+        
+        위 조건에 가장 적합한 매물 2-3개를 추천해주세요. 각 매물에 대해 다음 형식으로 답변해주세요:
+        
+        매물 1: [매물명]
+        가격: [매매가]
+        위치: [주소]
+        수익률: [수익률]
+        추천 이유: [이 사용자에게 왜 이 매물이 적합한지 간단히 설명]
+        
+        매물 2: ...
+        
+        조건에 맞는 매물이 없으면 '조건에 맞는 매물이 없습니다'라고 답변해주세요.
+        """
+        
+        # Claude API 호출
+        logger.info("Calling Claude API for property recommendations")
+        response = claude_client.messages.create(
+            model="claude-3-7-sonnet-20250219",
+            max_tokens=1000,
+            system="당신은 부동산 투자 전문가입니다. 사용자의 조건에 맞는 최적의 매물을 추천해주세요.",
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        recommendations = response.content[0].text
+        logger.info(f"Claude API response received: {len(recommendations)} characters")
+        
+        return jsonify({
+            "recommendations": recommendations
+        })
+        
+    except Exception as e:
+        logger.error(f"AI property search error: {str(e)}")
+        return jsonify({"error": f"Error processing request: {str(e)}"}), 500
 
 @app.route('/health')
 def health_check():
