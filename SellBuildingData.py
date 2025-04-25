@@ -135,6 +135,51 @@ def create_map():
     ).add_to(folium_map)
     folium.LayerControl().add_to(folium_map)
 
+    # CSS 삽입 (팝업 + 가격 말풍선)
+    folium_map.get_root().header.add_child(folium.Element("""
+    <style>
+    .custom-popup {
+        font-family: 'Noto Sans KR', sans-serif;
+        font-size: 13px;
+        padding: 12px;
+        background-color: #fff;
+        border: 2px solid #e38000;
+        border-radius: 10px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        line-height: 1.5;
+        max-width: 300px;
+    }
+    .price-bubble {
+        background-color: #fff;
+        border: 2px solid #e38000;
+        border-radius: 6px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        padding: 3px 6px;
+        font-size: 12px;
+        font-weight: bold;
+        color: #e38000;
+        white-space: nowrap;
+        text-align: center;
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 70px;
+    }
+    .price-bubble:after {
+        content: '';
+        position: absolute;
+        bottom: -8px;
+        left: 50%;
+        margin-left: -8px;
+        width: 0;
+        height: 0;
+        border-left: 8px solid transparent;
+        border-right: 8px solid transparent;
+        border-top: 8px solid #e38000;
+    }
+    </style>
+    """))
+
     address_data = get_airtable_data()
     if not address_data:
         print("에어테이블에서 가져온 주소 데이터가 없습니다.")
@@ -147,54 +192,8 @@ def create_map():
             continue
 
         price_display = f"{price:,}만원" if isinstance(price, int) and price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.') if isinstance(price, int) else (price or "가격정보 없음")
-
-        popup_html = f"<b>{name}</b><br>매가: {price_display}<br>"
-        if field_values.get('토지면적(㎡)'):
-            try:
-                sqm = float(field_values['토지면적(㎡)'])
-                pyeong = round(sqm / 3.3058)
-                popup_html += f"대지: {pyeong}평 ({sqm}㎡)<br>"
-            except:
-                pass
-        if field_values.get('층수'):
-            popup_html += f"층수: {field_values['층수']}<br>"
-        if field_values.get('주용도'):
-            popup_html += f"용도: {field_values['주용도']}<br>"
-
-        folium_map.get_root().header.add_child(folium.Element("""
-        <style>
-        .price-bubble {
-            background-color: #fff;
-            border: 2px solid #e38000;
-            border-radius: 6px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            padding: 3px 6px;
-            font-size: 12px;
-            font-weight: bold;
-            color: #e38000;
-            white-space: nowrap;
-            text-align: center;
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 70px;
-        }
-        .price-bubble:after {
-            content: '';
-            position: absolute;
-            bottom: -8px;
-            left: 50%;
-            margin-left: -8px;
-            width: 0;
-            height: 0;
-            border-left: 8px solid transparent;
-            border-right: 8px solid transparent;
-            border-top: 8px solid #e38000;
-        }
-        </style>
-        """))
-
         bubble_html = f'<div class="price-bubble">{price_display}</div>'
+
         icon = folium.DivIcon(
             html=bubble_html,
             icon_size=(100, 40),
@@ -202,45 +201,26 @@ def create_map():
             class_name="empty"
         )
 
-        escaped_name = json.dumps(name)[1:-1]
-        tooltip_script = f"""
-<script>
-document.addEventListener('DOMContentLoaded', function() {{
-  if (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches) {{
-    var tooltips = document.querySelectorAll('.leaflet-tooltip');
-    tooltips.forEach(function(tooltip) {{
-      tooltip.style.display = 'none';
-    }});
-
-    var observer = new MutationObserver(function(mutations) {{
-      mutations.forEach(function(mutation) {{
-        if (mutation.addedNodes) {{
-          mutation.addedNodes.forEach(function(node) {{
-            if (node.classList && node.classList.contains('leaflet-tooltip')) {{
-              node.style.display = 'none';
-            }}
-          }});
-        }}
-      }});
-    }});
-
-    observer.observe(document.body, {{ childList: true, subtree: true }});
-  }}
-}});
-</script>
+        popup_html = f"""
+        <div class="custom-popup">
+            <div style="font-size:14px; font-weight:bold; margin-bottom:6px;">{name}</div>
+            <div><b>매가:</b> <span style="color:#e38000;">{price_display}</span></div>
+            {'<div><b>대지면적:</b> ' + str(field_values.get('토지면적(㎡)', '정보 없음')) + '㎡</div>' if field_values.get('토지면적(㎡)') else ''}
+            {'<div><b>층수:</b> ' + str(field_values.get('층수')) + '</div>' if field_values.get('층수') else ''}
+            {'<div><b>용도:</b> ' + str(field_values.get('주용도')) + '</div>' if field_values.get('주용도') else ''}
+        </div>
         """
 
         folium.Marker(
             location=[lat, lon],
             popup=folium.Popup(popup_html, max_width=250),
             icon=icon
-        ).add_to(folium_map).get_root().html.add_child(folium.Element(tooltip_script))
+        ).add_to(folium_map)
 
     return folium_map
 
 if __name__ == "__main__":
     cache_file = '/home/sftpuser/www/airtable_map.html'
-    cache_time = 86400
     current_time = time.time()
 
     KST = timezone(timedelta(hours=9))
