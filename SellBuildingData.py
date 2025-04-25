@@ -2,13 +2,13 @@ import folium
 import requests
 import os
 import time
-from datetime import datetime
+from datetime import datetime, time as dtime, timedelta, timezone
+import json
 from dotenv import load_dotenv
 
 # 환경 변수 로드
 load_dotenv()
 
-# 환경 변수에서 API 키 가져오기
 vworld_apikey = os.environ.get('VWORLD_APIKEY', 'YOUR_DEFAULT_KEY')
 airtable_api_key = os.environ.get('AIRTABLE_API_KEY', 'YOUR_DEFAULT_API_KEY')
 
@@ -18,7 +18,6 @@ address_field = '지번 주소'
 price_field = '매가(만원)'
 status_field = '현황'
 
-# 팝업에 표시할 추가 필드
 additional_fields = {
     '토지면적(㎡)': '토지면적(㎡)',
     '연면적(㎡)': '연면적(㎡)',
@@ -146,9 +145,9 @@ def create_map():
         lat, lon = geocode_address(address)
         if lat is None or lon is None:
             continue
-    
+
         price_display = f"{price:,}만원" if isinstance(price, int) and price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.') if isinstance(price, int) else (price or "가격정보 없음")
-    
+
         popup_html = f"<b>{name}</b><br>매가: {price_display}<br>"
         if field_values.get('토지면적(㎡)'):
             try:
@@ -161,8 +160,7 @@ def create_map():
             popup_html += f"층수: {field_values['층수']}<br>"
         if field_values.get('주용도'):
             popup_html += f"용도: {field_values['주용도']}<br>"
-        
-        # CSS를 직접 삽입하는 대신 클래스를 사용
+
         folium_map.get_root().header.add_child(folium.Element("""
         <style>
         .price-bubble {
@@ -175,12 +173,11 @@ def create_map():
             font-weight: bold;
             color: #e38000;
             white-space: nowrap;
-            text-align: center;        
-            /* 위치 관련 추가 */
-            position: absolute;          /* 부모가 relative여야 함 */
-            left: 50%;                   /* 부모 기준 가운데 */
-            transform: translateX(-50%); /* 자기 자신 너비 절반만큼 왼쪽 이동 */
-            width: 70px;                /* 원하는 폭 설정 */
+            text-align: center;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 70px;
         }
         .price-bubble:after {
             content: '';
@@ -196,26 +193,49 @@ def create_map():
         }
         </style>
         """))
-        
-        # 간단한 HTML 구조 사용
+
         bubble_html = f'<div class="price-bubble">{price_display}</div>'
-        
-        # DivIcon 생성
         icon = folium.DivIcon(
             html=bubble_html,
             icon_size=(100, 40),
             icon_anchor=(50, 40),
-            class_name="empty"  # 기본 CSS 클래스를 사용하지 않도록 설정
+            class_name="empty"
         )
-        
-        # 마커 추가
+
+        escaped_name = json.dumps(name)[1:-1]
+        tooltip_script = f"""
+<script>
+document.addEventListener('DOMContentLoaded', function() {{
+  if (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches) {{
+    var tooltips = document.querySelectorAll('.leaflet-tooltip');
+    tooltips.forEach(function(tooltip) {{
+      tooltip.style.display = 'none';
+    }});
+
+    var observer = new MutationObserver(function(mutations) {{
+      mutations.forEach(function(mutation) {{
+        if (mutation.addedNodes) {{
+          mutation.addedNodes.forEach(function(node) {{
+            if (node.classList && node.classList.contains('leaflet-tooltip')) {{
+              node.style.display = 'none';
+            }}
+          }});
+        }}
+      }});
+    }});
+
+    observer.observe(document.body, {{ childList: true, subtree: true }});
+  }}
+}});
+</script>
+        """
+
         folium.Marker(
             location=[lat, lon],
             popup=folium.Popup(popup_html, max_width=250),
-            icon=icon,
-            tooltip=name
-        ).add_to(folium_map)
-    
+            icon=icon
+        ).add_to(folium_map).get_root().html.add_child(folium.Element(tooltip_script))
+
     return folium_map
 
 if __name__ == "__main__":
@@ -223,12 +243,7 @@ if __name__ == "__main__":
     cache_time = 86400
     current_time = time.time()
 
-    from datetime import time as dtime, timedelta, timezone
-
-    # 서울 타임존
     KST = timezone(timedelta(hours=9))
-
-    # 오늘 새벽 3시
     now = datetime.now(KST)
     today_3am = datetime.combine(now.date(), dtime(3, 0), tzinfo=KST)
     map_mtime = datetime.fromtimestamp(os.path.getmtime(cache_file), KST) if os.path.exists(cache_file) else None
