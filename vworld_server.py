@@ -318,7 +318,7 @@ def property_search():
         response = claude_client.messages.create(
             model="claude-3-7-sonnet-20250219",
             max_tokens=1000,
-            system="당신은 부동산 투자 전문가입니다. 사용자의 조건에 맞는 최적의 매물을 추천해주세요. 만일 딱 맞는 조건이 없다면 가장 근접한 조건으로 선택해 주세요.",
+            system="당신은 부동산 투자 전문가입니다. 사용자의 조건에 맞는 최적의 매물을 추천해주세요. 만일 딱 맞는 조건이 없다면 가장 근접한 조건으로 선택해 주세요. 참고로 자료에 나타난 단위는 모두 만원 단위야. 예를들어 150000은 15억원과 같이",
             messages=[
                 {"role": "user", "content": prompt}
             ]
