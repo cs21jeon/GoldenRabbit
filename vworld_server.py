@@ -273,14 +273,14 @@ def property_search():
             
             # 매물 정보 구조화 (필요한 필드만 추출)
             property_info = {
-                "id": record.get('id', ''),
-                "name": fields.get('건물명', ''),
-                "address": fields.get('주소', ''),
-                "price": fields.get('매매가', ''),
-                "monthly_income": fields.get('월소득', ''),
-                "yield": fields.get('수익률', ''),
-                "property_type": fields.get('건물종류', ''),
-                "area": fields.get('대지면적', '')
+                "id": record.get('레코드id', ''),
+                "address": fields.get('지번 주소', ''),
+                "price": fields.get('매가(만원)', ''),
+                "actual_investment": fields.get('실투자금', ''),
+                "monthly_income": fields.get('월세(만원)', ''),
+                "yield": fields.get('융자제외수익률(%)', ''),
+                "property_type": fields.get('주용도', ''),
+                "area": fields.get('토지면적(㎡)', '')
             }
             properties.append(property_info)
         
@@ -302,9 +302,9 @@ def property_search():
         
         위 조건에 가장 적합한 매물 2-3개를 추천해주세요. 각 매물에 대해 다음 형식으로 답변해주세요:
         
-        매물 1: [매물명]
-        가격: [매매가]
         위치: [주소]
+        가격: [매매가]
+        주용도: [주용도]
         수익률: [수익률]
         추천 이유: [이 사용자에게 왜 이 매물이 적합한지 간단히 설명]
         
@@ -318,7 +318,7 @@ def property_search():
         response = claude_client.messages.create(
             model="claude-3-7-sonnet-20250219",
             max_tokens=1000,
-            system="당신은 부동산 투자 전문가입니다. 사용자의 조건에 맞는 최적의 매물을 추천해주세요.",
+            system="당신은 부동산 투자 전문가입니다. 사용자의 조건에 맞는 최적의 매물을 추천해주세요. 만일 딱 맞는 조건이 없다면 가장 근접한 조건으로 선택해 주세요.",
             messages=[
                 {"role": "user", "content": prompt}
             ]
