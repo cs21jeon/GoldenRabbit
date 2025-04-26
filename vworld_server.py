@@ -244,7 +244,7 @@ def property_search():
         airtable_key = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
         table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
-        view_id = os.environ.get("AIRTABLE_VIEW_ID")
+        view_id = os.environ.get("AIRTABLE_ALL_VIEW_ID", "viwyV15T4ihMpbDbr")
         
         if not airtable_key:
             return jsonify({"error": "Airtable API key not set"}), 500
