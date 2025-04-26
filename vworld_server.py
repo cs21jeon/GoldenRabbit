@@ -335,6 +335,41 @@ def property_search():
         logger.error(f"AI property search error: {str(e)}")
         return jsonify({"error": f"Error processing request: {str(e)}"}), 500
 
+# 임시 테스트 엔드포인트 추가 (vworld_server.py에 추가)
+@app.route('/api/test-airtable-data', methods=['GET'])
+def test_airtable_data():
+    airtable_key = os.environ.get("AIRTABLE_API_KEY")
+    base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
+    table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
+    
+    if not airtable_key:
+        return jsonify({"error": "Airtable API key not set"}), 500
+        
+    headers = {
+        "Authorization": f"Bearer {airtable_key}"
+    }
+    
+    url = f"https://api.airtable.com/v0/{base_id}/{table_id}?maxRecords=3"
+    
+    try:
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            return jsonify({
+                "error": "Airtable API error", 
+                "status_code": response.status_code,
+                "details": response.text
+            }), 500
+            
+        return jsonify({
+            "success": True,
+            "record_count": len(response.json().get('records', [])),
+            "first_three_records": response.json().get('records', [])
+        })
+            
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/health')
 def health_check():
     """서버 상태 확인용 엔드포인트"""
