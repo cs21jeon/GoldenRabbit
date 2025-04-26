@@ -258,16 +258,34 @@ def property_search():
         if view_id:
             url += f"?view={view_id}"
         
+        # API 요청 로깅
+        logger.info(f"Requesting Airtable data from: {url}")
+
         response = requests.get(url, headers=headers)
         
         if response.status_code != 200:
             logger.error(f"Failed to fetch properties: {response.text}")
             return jsonify({"error": "Failed to fetch property data"}), 500
         
+        # 응답 로깅
+        logger.info(f"Airtable response status: {response.status_code}")
+        logger.info(f"Airtable response length: {len(response.text)} characters")
+
         # 에어테이블 데이터 처리
         properties_data = response.json()
-        properties = []
         
+        # 레코드 수 로깅
+        record_count = len(properties_data.get('records', []))
+        logger.info(f"Received {record_count} records from Airtable")
+
+        # 첫 번째 레코드의 필드명 로깅
+        if record_count > 0:
+            first_record = properties_data['records'][0]
+            logger.info(f"Sample record ID: {first_record.get('id')}")
+            logger.info(f"Available fields: {', '.join(first_record.get('fields', {}).keys())}")
+        
+        properties = []
+
         for record in properties_data.get('records', []):
             fields = record.get('fields', {})
             
@@ -284,6 +302,15 @@ def property_search():
             }
             properties.append(property_info)
         
+        # 처리된 데이터 로깅
+        logger.info(f"Processed {len(properties)} properties")
+        
+        # 첫 번째 처리된 매물 정보 로깅
+        if properties:
+            logger.info(f"Sample processed property: {json.dumps(properties[0], ensure_ascii=False)}")
+        else:
+            logger.warning("No properties were processed successfully")
+
         # 데이터 양이 너무 많으면 제한
         if len(properties) > 15:
             logger.info(f"Limiting properties from {len(properties)} to 15")
@@ -334,41 +361,6 @@ def property_search():
     except Exception as e:
         logger.error(f"AI property search error: {str(e)}")
         return jsonify({"error": f"Error processing request: {str(e)}"}), 500
-
-# 임시 테스트 엔드포인트 추가 (vworld_server.py에 추가)
-@app.route('/api/test-airtable-data', methods=['GET'])
-def test_airtable_data():
-    airtable_key = os.environ.get("AIRTABLE_API_KEY")
-    base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
-    table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
-    
-    if not airtable_key:
-        return jsonify({"error": "Airtable API key not set"}), 500
-        
-    headers = {
-        "Authorization": f"Bearer {airtable_key}"
-    }
-    
-    url = f"https://api.airtable.com/v0/{base_id}/{table_id}?maxRecords=3"
-    
-    try:
-        response = requests.get(url, headers=headers)
-        
-        if response.status_code != 200:
-            return jsonify({
-                "error": "Airtable API error", 
-                "status_code": response.status_code,
-                "details": response.text
-            }), 500
-            
-        return jsonify({
-            "success": True,
-            "record_count": len(response.json().get('records', [])),
-            "first_three_records": response.json().get('records', [])
-        })
-            
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/health')
 def health_check():
