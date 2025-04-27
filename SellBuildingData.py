@@ -259,6 +259,9 @@ def create_map():
         
         # 상세내역 보기 링크 추가
         popup_html += f'<a href="{airtable_record_url}" target="_blank" class="detail-link">상세내역보기-클릭</a>'
+        # 이 매물 문의하기 링크 추가
+        popup_html += f'<a href="javascript:void(0);" onclick="openConsultModal(\'{address}\')" class="detail-link" style="background-color:#2962FF; color:white; margin-top:5px;">이 매물 문의하기</a>'
+
         popup_html += "</div>"
 
         bubble_html = f'<div class="price-bubble">{price_display}</div>'
