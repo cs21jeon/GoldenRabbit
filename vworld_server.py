@@ -368,7 +368,7 @@ def property_search():
 
 @app.route('/api/blog-feed')
 def blog_feed():
-    feed_url = "https://rss.blog.naver.com/네이버아이디.xml"  # 수정해야함
+    feed_url = "https://rss.blog.naver.com/goldenrabbit7377.xml"  # 수정해야함
     feed = feedparser.parse(feed_url)
 
     posts = []
