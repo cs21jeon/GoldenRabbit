@@ -7,6 +7,7 @@ from flask_cors import CORS
 import logging
 from functools import lru_cache
 import anthropic  # Claude API를 위한 패키지 추가
+import feedparser  # 네이버 블로그 RSS를 파싱하기 위해 필요
 
 # 환경 변수 로드
 load_dotenv()
@@ -364,6 +365,22 @@ def property_search():
     except Exception as e:
         logger.error(f"AI property search error: {str(e)}")
         return jsonify({"error": f"Error processing request: {str(e)}"}), 500
+
+@app.route('/api/blog-feed')
+def blog_feed():
+    feed_url = "https://rss.blog.naver.com/네이버아이디.xml"  # 수정해야함
+    feed = feedparser.parse(feed_url)
+
+    posts = []
+    for entry in feed.entries[:5]:  # 최신 5개만 가져오기
+        posts.append({
+            "title": entry.title,
+            "link": entry.link,
+            "summary": entry.summary,
+            "published": entry.published
+        })
+
+    return jsonify(posts)
 
 @app.route('/health')
 def health_check():
