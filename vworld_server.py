@@ -368,11 +368,11 @@ def property_search():
 
 @app.route('/api/blog-feed')
 def blog_feed():
-    feed_url = "https://rss.blog.naver.com/goldenrabbit7377.xml"  # 수정해야함
+    feed_url = "https://rss.blog.naver.com/goldenrabbit7377.xml"  
     feed = feedparser.parse(feed_url)
 
     posts = []
-    for entry in feed.entries[:5]:  # 최신 5개만 가져오기
+    for entry in feed.entries[:3]:  # 최신 3개만 가져오기
         posts.append({
             "title": entry.title,
             "link": entry.link,
