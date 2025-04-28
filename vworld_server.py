@@ -372,7 +372,7 @@ def blog_feed():
     feed = feedparser.parse(feed_url)
 
     posts = []
-    for entry in feed.entries[:3]:  # 최신 3개만 가져오기
+    for entry in feed.entries[:10]:  # ✨ 최신 10개까지 가져오기
         posts.append({
             "title": entry.title,
             "link": entry.link,
