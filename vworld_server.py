@@ -8,6 +8,7 @@ import logging
 from functools import lru_cache
 import anthropic  # Claude API를 위한 패키지 추가
 import feedparser  # 네이버 블로그 RSS를 파싱하기 위해 필요
+from datetime import datetime, timedelta
 
 # 환경 변수 로드
 load_dotenv()
@@ -20,6 +21,12 @@ vworld_key = os.environ.get("VWORLD_APIKEY")
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 블로그 캐시 저장 변수
+blog_cache = {
+    "timestamp": None,
+    "posts": []
+}
 
 # Anthropic API 키 설정
 anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
@@ -368,6 +375,13 @@ def property_search():
 
 @app.route('/api/blog-feed')
 def blog_feed():
+    now = datetime.now()
+    cache_duration = timedelta(hours=24)
+
+    # 캐시가 있고, 24시간 이내이면 재사용
+    if blog_cache["timestamp"] and now - blog_cache["timestamp"] < cache_duration:
+        return jsonify(blog_cache["posts"])
+
     feed_url = "https://rss.blog.naver.com/goldenrabbit7377.xml"  
     feed = feedparser.parse(feed_url)
 
@@ -379,6 +393,10 @@ def blog_feed():
             "summary": entry.summary,
             "published": entry.published
         })
+
+    # 캐시 저장
+    blog_cache["timestamp"] = now
+    blog_cache["posts"] = posts
 
     return jsonify(posts)
 
