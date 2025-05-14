@@ -34,9 +34,10 @@ blog_cache = {
 thumbnail_dir = "/home/sftpuser/www/blog_thumbs"
 os.makedirs(thumbnail_dir, exist_ok=True)
 
+# logNo 추출용 함수 추가
 def extract_log_no(link):
-    parsed = urlparse(link)
-    return parse_qs(parsed.query).get('logNo', [None])[0]
+    match = re.search(r'/(\d+)', link)
+    return match.group(1) if match else None
 
 def extract_image(summary):
     soup = BeautifulSoup(summary, 'html.parser')
@@ -864,32 +865,16 @@ def blog_feed():
 
     posts = []
     for entry in feed.entries[:10]:
-        title = entry.title
-        link = entry.link
-        summary = entry.summary
-        published = entry.published
-
-        log_no = extract_log_no(link)
-        image_url = extract_image(summary)
-        image_filename = f"{log_no}.jpg"
-        local_path = os.path.join(thumbnail_dir, image_filename)
-
-        # 썸네일 저장
-        if image_url and not os.path.exists(local_path):
-            try:
-                r = requests.get(image_url, timeout=10)
-                if r.status_code == 200:
-                    with open(local_path, 'wb') as f:
-                        f.write(r.content)
-            except:
-                pass
+        log_no = extract_log_no(entry.link)  # ✨ logNo 추출
+        if not log_no:
+            continue  # logNo 없는 건 건너뜀
 
         posts.append({
-            "title": title,
-            "link": link,
-            "summary": summary,
-            "published": published,
-            "thumbnail": f"/blog_thumbs/{image_filename}" if os.path.exists(local_path) else None
+            "id": log_no,  # ✅ 프론트엔드에서 사용할 수 있도록 포함
+            "title": entry.title,
+            "link": entry.link,
+            "summary": entry.summary,
+            "published": entry.published
         })
 
     blog_cache["timestamp"] = now
