@@ -19,7 +19,7 @@ CORS(app)  # CORS 지원 추가
 vworld_key = os.environ.get("VWORLD_APIKEY")
 
 # 로깅 설정
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # 블로그 캐시 저장 변수
@@ -331,14 +331,19 @@ def search_map():
             should_include = True
             filter_reasons = []
             
-            # 매가 조건 (디버깅 로그 추가)
-            if data.get('price_value') and data.get('price_condition') != 'all':
+            # 매가 조건
+            if data.get('price_value', '').strip() and data.get('price_condition') != 'all':
                 price = fields.get('매가(만원)', 0)
                 try:
-                    price = float(price) if price else 0
+                    # price가 문자열인 경우 숫자로 변환
+                    if isinstance(price, str):
+                        price = float(price.replace(',', ''))
+                    else:
+                        price = float(price) if price else 0
+                    
                     price_val = float(data['price_value'])
                     
-                    logger.debug(f"가격 필터링 - 매물가격: {price}, 조건값: {price_val}, 조건: {data['price_condition']}")
+                    logger.debug(f"가격 필터링 - 주소: {fields.get('지번 주소', '')}, 매물가격: {price}, 조건값: {price_val}, 조건: {data['price_condition']}")
                     
                     if data['price_condition'] == 'above' and price < price_val:
                         should_include = False
@@ -347,15 +352,42 @@ def search_map():
                         should_include = False
                         filter_reasons.append(f"가격 {price} > {price_val}")
                 except Exception as e:
-                    logger.warning(f"Price parsing error: {e}, price value: {fields.get('매가(만원)')}")
-                    should_include = False
-                    filter_reasons.append(f"가격 파싱 오류: {e}")
+                    logger.warning(f"Price parsing error for {fields.get('지번 주소', '')}: {e}, price value: {fields.get('매가(만원)')}")
+                    price = 0  # 파싱 실패시 0으로 설정
             
-            # 실투자금 조건 - early exit 제거
-            if data.get('investment_value') and data.get('investment_condition') != 'all':
+            # 수익률 조건
+            if data.get('yield_value', '').strip() and data.get('yield_condition') != 'all':
+                yield_rate = fields.get('융자제외수익률(%)', 0)
+                try:
+                    # yield_rate가 문자열인 경우 숫자로 변환
+                    if isinstance(yield_rate, str):
+                        yield_rate = float(yield_rate.replace(',', '').replace('%', ''))
+                    else:
+                        yield_rate = float(yield_rate) if yield_rate else 0
+                    
+                    yield_val = float(data['yield_value'])
+                    
+                    logger.debug(f"수익률 필터링 - 주소: {fields.get('지번 주소', '')}, 수익률: {yield_rate}, 조건값: {yield_val}, 조건: {data['yield_condition']}")
+                    
+                    if data['yield_condition'] == 'above' and yield_rate < yield_val:
+                        should_include = False
+                        filter_reasons.append(f"수익률 {yield_rate} < {yield_val}")
+                    elif data['yield_condition'] == 'below' and yield_rate > yield_val:
+                        should_include = False
+                        filter_reasons.append(f"수익률 {yield_rate} > {yield_val}")
+                except Exception as e:
+                    logger.warning(f"Yield parsing error for {fields.get('지번 주소', '')}: {e}, yield value: {fields.get('융자제외수익률(%)')}")
+                    yield_rate = 0  # 파싱 실패시 0으로 설정
+            
+            # 실투자금 조건
+            if data.get('investment_value', '').strip() and data.get('investment_condition') != 'all':
                 investment = fields.get('실투자금', 0)
                 try:
-                    investment = float(investment) if investment else 0
+                    if isinstance(investment, str):
+                        investment = float(investment.replace(',', ''))
+                    else:
+                        investment = float(investment) if investment else 0
+                    
                     investment_val = float(data['investment_value'])
                     
                     logger.debug(f"실투자금 필터링 - 실투자금: {investment}, 조건값: {investment_val}, 조건: {data['investment_condition']}")
@@ -366,34 +398,19 @@ def search_map():
                     elif data['investment_condition'] == 'below' and investment > investment_val:
                         should_include = False
                         filter_reasons.append(f"실투자금 {investment} > {investment_val}")
-                except:
-                    should_include = False
-                    filter_reasons.append("실투자금 파싱 오류")
+                except Exception as e:
+                    logger.warning(f"Investment parsing error: {e}")
+                    investment = 0
             
-            # 수익률 조건 - early exit 제거
-            if data.get('yield_value') and data.get('yield_condition') != 'all':
-                yield_rate = fields.get('융자제외수익률(%)', 0)
-                try:
-                    yield_rate = float(yield_rate) if yield_rate else 0
-                    yield_val = float(data['yield_value'])
-                    
-                    logger.debug(f"수익률 필터링 - 수익률: {yield_rate}, 조건값: {yield_val}, 조건: {data['yield_condition']}")
-                    
-                    if data['yield_condition'] == 'above' and yield_rate < yield_val:
-                        should_include = False
-                        filter_reasons.append(f"수익률 {yield_rate} < {yield_val}")
-                    elif data['yield_condition'] == 'below' and yield_rate > yield_val:
-                        should_include = False
-                        filter_reasons.append(f"수익률 {yield_rate} > {yield_val}")
-                except:
-                    should_include = False
-                    filter_reasons.append("수익률 파싱 오류")
-            
-            # 토지면적 조건 - early exit 제거
-            if data.get('area_value') and data.get('area_condition') != 'all':
+            # 토지면적 조건
+            if data.get('area_value', '').strip() and data.get('area_condition') != 'all':
                 area = fields.get('토지면적(㎡)', 0)
                 try:
-                    area = float(area) if area else 0
+                    if isinstance(area, str):
+                        area = float(area.replace(',', ''))
+                    else:
+                        area = float(area) if area else 0
+                    
                     area_val = float(data['area_value'])
                     
                     logger.debug(f"토지면적 필터링 - 면적: {area}, 조건값: {area_val}, 조건: {data['area_condition']}")
@@ -404,16 +421,16 @@ def search_map():
                     elif data['area_condition'] == 'below' and area > area_val:
                         should_include = False
                         filter_reasons.append(f"토지면적 {area} > {area_val}")
-                except:
-                    should_include = False
-                    filter_reasons.append("토지면적 파싱 오류")
+                except Exception as e:
+                    logger.warning(f"Area parsing error: {e}")
+                    area = 0
             
-            # 사용승인일 조건 - early exit 제거
-            if data.get('approval_date') and data.get('approval_condition') != 'all':
+            # 사용승인일 조건
+            if data.get('approval_date', '').strip() and data.get('approval_condition') != 'all':
                 approval = fields.get('사용승인일', '')
                 try:
-                    if approval:
-                        approval_datetime = datetime.strptime(approval, '%Y-%m-%d')
+                    if approval and approval.strip():
+                        approval_datetime = datetime.strptime(approval.strip(), '%Y-%m-%d')
                         target_datetime = datetime.strptime(data['approval_date'], '%Y-%m-%d')
                         
                         logger.debug(f"승인일 필터링 - 승인일: {approval}, 조건일: {data['approval_date']}, 조건: {data['approval_condition']}")
@@ -425,9 +442,7 @@ def search_map():
                             should_include = False
                             filter_reasons.append(f"사용승인일 {approval} <= {data['approval_date']}")
                 except Exception as e:
-                    logger.warning(f"Date parsing error: {e}")
-                    should_include = False
-                    filter_reasons.append("날짜 파싱 오류")
+                    logger.warning(f"Date parsing error: {e}, approval date: {approval}")
             
             if not should_include:
                 condition_filtered_count += 1
