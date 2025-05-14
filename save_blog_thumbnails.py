@@ -4,17 +4,15 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
-# 썸네일 저장 경로
 save_dir = '/home/sftpuser/www/blog_thumbs/'
 os.makedirs(save_dir, exist_ok=True)
 
-# 네이버 블로그 RSS URL
 feed_url = 'https://rss.blog.naver.com/goldenrabbit7377.xml'
 feed = feedparser.parse(feed_url)
 
-for entry in feed.entries[:10]:  # 최신 10개 가져오기
-    # logNo 추출
-    match = re.search(r'logNo=(\d+)', entry.link)
+for entry in feed.entries[:10]:
+    # ✅ 슬래시 뒤 숫자 추출
+    match = re.search(r'/(\d+)', entry.link)
     if not match:
         print(f"❌ logNo 추출 실패: {entry.link}")
         continue
@@ -23,7 +21,6 @@ for entry in feed.entries[:10]:  # 최신 10개 가져오기
     image_filename = f"{log_no}.jpg"
     save_path = os.path.join(save_dir, image_filename)
 
-    # entry.summary에서 <img> 추출
     soup = BeautifulSoup(entry.summary, 'html.parser')
     img_tag = soup.find('img')
 
