@@ -865,16 +865,21 @@ def blog_feed():
 
     posts = []
     for entry in feed.entries[:10]:
-        log_no = extract_log_no(entry.link)  # ✨ logNo 추출
+        log_no = extract_log_no(entry.link)
         if not log_no:
-            continue  # logNo 없는 건 건너뜀
+            continue
+
+        # 로컬 이미지 파일 존재 여부 확인
+        local_image_path = f'/home/sftpuser/www/blog_thumbs/{log_no}.jpg'
+        has_thumbnail = os.path.exists(local_image_path)
 
         posts.append({
-            "id": log_no,  # ✅ 프론트엔드에서 사용할 수 있도록 포함
+            "id": log_no,
             "title": entry.title,
             "link": entry.link,
             "summary": entry.summary,
-            "published": entry.published
+            "published": entry.published,
+            "has_thumbnail": has_thumbnail  # 썸네일 존재 여부 추가
         })
 
     blog_cache["timestamp"] = now
