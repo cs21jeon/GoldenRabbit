@@ -31,7 +31,9 @@ additional_fields = {
     '월세(만원)': '월세(만원)',
     '인접역': '인접역',
     '거리(m)': '거리(m)',
-    '상세설명': '상세설명'
+    '상세설명': '상세설명',
+    '실투자금': '실투자금',
+    '융자제외수익률(%)': '융자제외수익률(%)'
 }
 
 def get_airtable_data():
@@ -64,7 +66,7 @@ def get_airtable_data():
 
         address_data = []
         for record in all_records:
-            record_id = record.get('id')  # 레코드 ID 저장
+            record_id = record.get('id')
             fields = record.get('fields', {})
             address = fields.get(address_field)
             name = address
@@ -89,7 +91,7 @@ def get_airtable_data():
                         price = int(price)
                 except:
                     pass
-                address_data.append([name, address, price, status, field_values, record_id])  # record_id 추가
+                address_data.append([name, address, price, status, field_values, record_id])
         return address_data
     except Exception as e:
         print(f"API 요청 중 예외 발생: {str(e)}")
@@ -176,8 +178,8 @@ def create_map():
         padding: 0;
     }
     .leaflet-popup-content {
-        margin: 8px 10px;  /* 여백 줄임 */
-        font-size: 14px;   /* 글자 크기 키움 */
+        margin: 8px 10px;
+        font-size: 14px;
         line-height: 1.5;
     }
     .leaflet-popup-tip {
@@ -225,11 +227,33 @@ def create_map():
         print("에어테이블에서 가져온 주소 데이터가 없습니다.")
         return folium_map
 
+    # JavaScript 데이터 수집
+    javascript_data = []
+    marker_index = 0
+
     for addr in address_data:
-        name, address, price, status, field_values, record_id = addr  # record_id 추가
+        name, address, price, status, field_values, record_id = addr
         lat, lon = geocode_address(address)
         if lat is None or lon is None:
             continue
+
+        # JavaScript 데이터에 추가
+        javascript_data.append({
+            'index': marker_index,
+            'lat': lat,
+            'lon': lon,
+            'name': name,
+            'address': address,
+            'price': field_values.get('매가(만원)', 0),
+            'investment': field_values.get('실투자금', 0),
+            'yield': field_values.get('융자제외수익률(%)', 0),
+            'area': field_values.get('토지면적(㎡)', 0),
+            'approval_date': field_values.get('사용승인일', ''),
+            'record_id': record_id,
+            'layers': field_values.get('층수', ''),
+            'usage': field_values.get('주용도', ''),
+            'land_area': field_values.get('토지면적(㎡)', 0)
+        })
 
         price_display = f"{price:,}만원" if isinstance(price, int) and price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.') if isinstance(price, int) else (price or "가격정보 없음")
 
@@ -272,11 +296,151 @@ def create_map():
             class_name="empty"
         )
 
-        folium.Marker(
+        marker = folium.Marker(
             location=[lat, lon],
             popup=folium.Popup(popup_html, max_width=250),
             icon=icon
-        ).add_to(folium_map)
+        )
+        marker._name = f"marker_{marker_index}"
+        marker.add_to(folium_map)
+        marker_index += 1
+
+    # JavaScript 필터링 코드 추가
+    javascript_code = f"""
+    <script>
+    var allProperties = {json.dumps(javascript_data, ensure_ascii=False)};
+    
+    // 마커 참조 저장
+    var markers = {{}};
+    {folium_map._name}.eachLayer(function(layer) {{
+        if (layer instanceof L.Marker) {{
+            var markerName = layer._myName;
+            if (markerName && markerName.startsWith('marker_')) {{
+                var index = parseInt(markerName.split('_')[1]);
+                markers[index] = layer;
+            }}
+        }}
+    }});
+    
+    function filterProperties(conditions) {{
+        var filteredProperties = [];
+        
+        allProperties.forEach(function(property, index) {{
+            var shouldShow = true;
+            
+            // 매가 조건
+            if (conditions.price_value && conditions.price_condition !== 'all') {{
+                var price = parseFloat(property.price) || 0;
+                var priceVal = parseFloat(conditions.price_value);
+                if (conditions.price_condition === 'above' && price < priceVal) shouldShow = false;
+                if (conditions.price_condition === 'below' && price > priceVal) shouldShow = false;
+            }}
+            
+            // 실투자금 조건
+            if (conditions.investment_value && conditions.investment_condition !== 'all') {{
+                var investment = parseFloat(property.investment) || 0;
+                var investmentVal = parseFloat(conditions.investment_value);
+                if (conditions.investment_condition === 'above' && investment < investmentVal) shouldShow = false;
+                if (conditions.investment_condition === 'below' && investment > investmentVal) shouldShow = false;
+            }}
+            
+            // 수익률 조건
+            if (conditions.yield_value && conditions.yield_condition !== 'all') {{
+                var yieldRate = parseFloat(property.yield) || 0;
+                var yieldVal = parseFloat(conditions.yield_value);
+                if (conditions.yield_condition === 'above' && yieldRate < yieldVal) shouldShow = false;
+                if (conditions.yield_condition === 'below' && yieldRate > yieldVal) shouldShow = false;
+            }}
+            
+            // 토지면적 조건
+            if (conditions.area_value && conditions.area_condition !== 'all') {{
+                var area = parseFloat(property.area) || 0;
+                var areaVal = parseFloat(conditions.area_value);
+                if (conditions.area_condition === 'above' && area < areaVal) shouldShow = false;
+                if (conditions.area_condition === 'below' && area > areaVal) shouldShow = false;
+            }}
+            
+            // 사용승인일 조건
+            if (conditions.approval_date && conditions.approval_condition !== 'all') {{
+                var approval = property.approval_date;
+                if (approval) {{
+                    var approvalDate = new Date(approval);
+                    var targetDate = new Date(conditions.approval_date);
+                    if (conditions.approval_condition === 'before' && approvalDate >= targetDate) shouldShow = false;
+                    if (conditions.approval_condition === 'after' && approvalDate <= targetDate) shouldShow = false;
+                }}
+            }}
+            
+            if (shouldShow) {{
+                filteredProperties.push(property);
+            }}
+            
+            // 마커 표시/숨김
+            var marker = markers[index];
+            if (marker) {{
+                if (shouldShow) {{
+                    marker.addTo({folium_map._name});
+                }} else {{
+                    {folium_map._name}.removeLayer(marker);
+                }}
+            }}
+        }});
+        
+        return filteredProperties;
+    }}
+    
+    // 전체 마커 표시
+    function showAllMarkers() {{
+        Object.values(markers).forEach(function(marker) {{
+            marker.addTo({folium_map._name});
+        }});
+    }}
+    
+    // 부모 창과 통신
+    window.addEventListener('message', function(event) {{
+        if (event.data.type === 'filter') {{
+            var filtered = filterProperties(event.data.conditions);
+            // 부모 창에 결과 전송
+            parent.postMessage({{
+                type: 'filterResult',
+                count: filtered.length
+            }}, '*');
+        }} else if (event.data.type === 'reset') {{
+            showAllMarkers();
+            parent.postMessage({{
+                type: 'filterResult',
+                count: allProperties.length
+            }}, '*');
+        }}
+    }});
+    
+    // 마커에 인덱스 저장
+    {folium_map._name}.eachLayer(function(layer) {{
+        if (layer instanceof L.Marker && layer.options.icon) {{
+            var iconHtml = layer.options.icon.options.html;
+            var match = iconHtml.match(/>([\d,]+)만원<|>([\d.]+)억원</);
+            if (match) {{
+                var priceText = match[1] || match[2];
+                for (var i = 0; i < allProperties.length; i++) {{
+                    var prop = allProperties[i];
+                    var propPrice = prop.price;
+                    var displayPrice = propPrice < 10000 ? 
+                        (propPrice + '').replace(/\B(?=(\d{{3}})+(?!\d))/g, ',') + '만원' :
+                        (propPrice / 10000).toFixed(1).replace(/\.0$/, '') + '억원';
+                    
+                    if (displayPrice.includes(priceText)) {{
+                        layer._myName = 'marker_' + i;
+                        markers[i] = layer;
+                        break;
+                    }}
+                }}
+            }}
+        }}
+    }});
+    </script>
+    """
+    
+    folium_map.get_root().header.add_child(folium.Element(javascript_code))
 
     return folium_map
 
