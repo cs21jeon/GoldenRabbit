@@ -238,14 +238,16 @@ def search_map():
         from datetime import datetime
         
         # 검색 조건 받기
-        data = request.json
-        logger.info(f"Search conditions: {data}")
+        search_conditions = request.json  # 변수명 변경
+        logger.info(f"Search conditions: {search_conditions}")
         
         # Airtable에서 데이터 가져오기 (환경 변수에서 읽기)
         airtable_key = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
         table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
         view_id = os.environ.get("AIRTABLE_ALL_VIEW_ID", "viwyV15T4ihMpbDbr")
+        
+        logger.info(f"Using view ID: {view_id}")
         
         if not airtable_key:
             logger.error("AIRTABLE_API_KEY not set")
@@ -285,15 +287,15 @@ def search_map():
                         "details": response.text
                     }), response.status_code
                     
-                data = response.json()
-                records = data.get('records', [])
+                airtable_data = response.json()  # 변수명 변경
+                records = airtable_data.get('records', [])
                 all_records.extend(records)
                 
                 logger.info(f"Page {page_count + 1}: {len(records)} records fetched")
                 page_count += 1
                 
                 # 다음 페이지가 있는지 확인
-                offset = data.get('offset')
+                offset = airtable_data.get('offset')
                 if not offset:
                     break
                     
@@ -308,8 +310,23 @@ def search_map():
         condition_filtered_count = 0
         geocoding_failed_count = 0
         
-        for record in all_records:
+        # 검색 조건 디버깅
+        active_filters = []
+        if search_conditions.get('price_value', '').strip():
+            active_filters.append(f"가격 {search_conditions['price_condition']} {search_conditions['price_value']}")
+        if search_conditions.get('yield_value', '').strip():
+            active_filters.append(f"수익률 {search_conditions['yield_condition']} {search_conditions['yield_value']}")
+        
+        logger.info(f"Active filters: {', '.join(active_filters) if active_filters else 'None'}")
+        
+        for i, record in enumerate(all_records):
             fields = record.get('fields', {})
+            
+            # 처음 5개 레코드의 필드값 로깅
+            if i < 5:
+                logger.debug(f"Record {i} - 주소: {fields.get('지번 주소', '')}")
+                logger.debug(f"  매가: {fields.get('매가(만원)', '')}")
+                logger.debug(f"  수익률: {fields.get('융자제외수익률(%)', '')}")
             
             # 현황 필드 확인
             status = fields.get('현황')
@@ -332,121 +349,114 @@ def search_map():
             filter_reasons = []
             
             # 매가 조건
-            if data.get('price_value', '').strip() and data.get('price_condition') != 'all':
-                price = fields.get('매가(만원)', 0)
+            if search_conditions.get('price_value', '').strip() and search_conditions.get('price_condition') != 'all':
+                price_raw = fields.get('매가(만원)', 0)
                 try:
                     # price가 문자열인 경우 숫자로 변환
-                    if isinstance(price, str):
-                        price = float(price.replace(',', ''))
+                    if isinstance(price_raw, str):
+                        price = float(price_raw.replace(',', ''))
                     else:
-                        price = float(price) if price else 0
+                        price = float(price_raw) if price_raw else 0
                     
-                    price_val = float(data['price_value'])
+                    price_val = float(search_conditions['price_value'])
                     
-                    logger.debug(f"가격 필터링 - 주소: {fields.get('지번 주소', '')}, 매물가격: {price}, 조건값: {price_val}, 조건: {data['price_condition']}")
+                    if i < 5:  # 디버깅
+                        logger.debug(f"  가격 필터링: {price} {search_conditions['price_condition']} {price_val}")
                     
-                    if data['price_condition'] == 'above' and price < price_val:
+                    if search_conditions['price_condition'] == 'above' and price < price_val:
                         should_include = False
                         filter_reasons.append(f"가격 {price} < {price_val}")
-                    elif data['price_condition'] == 'below' and price > price_val:
+                    elif search_conditions['price_condition'] == 'below' and price > price_val:
                         should_include = False
                         filter_reasons.append(f"가격 {price} > {price_val}")
                 except Exception as e:
-                    logger.warning(f"Price parsing error for {fields.get('지번 주소', '')}: {e}, price value: {fields.get('매가(만원)')}")
-                    price = 0  # 파싱 실패시 0으로 설정
+                    logger.warning(f"Price parsing error for record {i}: {e}, raw value: {price_raw}")
             
             # 수익률 조건
-            if data.get('yield_value', '').strip() and data.get('yield_condition') != 'all':
-                yield_rate = fields.get('융자제외수익률(%)', 0)
+            if should_include and search_conditions.get('yield_value', '').strip() and search_conditions.get('yield_condition') != 'all':
+                yield_raw = fields.get('융자제외수익률(%)', 0)
                 try:
                     # yield_rate가 문자열인 경우 숫자로 변환
-                    if isinstance(yield_rate, str):
-                        yield_rate = float(yield_rate.replace(',', '').replace('%', ''))
+                    if isinstance(yield_raw, str):
+                        yield_rate = float(yield_raw.replace(',', '').replace('%', ''))
                     else:
-                        yield_rate = float(yield_rate) if yield_rate else 0
+                        yield_rate = float(yield_raw) if yield_raw else 0
                     
-                    yield_val = float(data['yield_value'])
+                    yield_val = float(search_conditions['yield_value'])
                     
-                    logger.debug(f"수익률 필터링 - 주소: {fields.get('지번 주소', '')}, 수익률: {yield_rate}, 조건값: {yield_val}, 조건: {data['yield_condition']}")
+                    if i < 5:  # 디버깅
+                        logger.debug(f"  수익률 필터링: {yield_rate} {search_conditions['yield_condition']} {yield_val}")
                     
-                    if data['yield_condition'] == 'above' and yield_rate < yield_val:
+                    if search_conditions['yield_condition'] == 'above' and yield_rate < yield_val:
                         should_include = False
                         filter_reasons.append(f"수익률 {yield_rate} < {yield_val}")
-                    elif data['yield_condition'] == 'below' and yield_rate > yield_val:
+                    elif search_conditions['yield_condition'] == 'below' and yield_rate > yield_val:
                         should_include = False
                         filter_reasons.append(f"수익률 {yield_rate} > {yield_val}")
                 except Exception as e:
-                    logger.warning(f"Yield parsing error for {fields.get('지번 주소', '')}: {e}, yield value: {fields.get('융자제외수익률(%)')}")
-                    yield_rate = 0  # 파싱 실패시 0으로 설정
+                    logger.warning(f"Yield parsing error for record {i}: {e}, raw value: {yield_raw}")
             
             # 실투자금 조건
-            if data.get('investment_value', '').strip() and data.get('investment_condition') != 'all':
-                investment = fields.get('실투자금', 0)
+            if should_include and search_conditions.get('investment_value', '').strip() and search_conditions.get('investment_condition') != 'all':
+                investment_raw = fields.get('실투자금', 0)
                 try:
-                    if isinstance(investment, str):
-                        investment = float(investment.replace(',', ''))
+                    if isinstance(investment_raw, str):
+                        investment = float(investment_raw.replace(',', ''))
                     else:
-                        investment = float(investment) if investment else 0
+                        investment = float(investment_raw) if investment_raw else 0
                     
-                    investment_val = float(data['investment_value'])
+                    investment_val = float(search_conditions['investment_value'])
                     
-                    logger.debug(f"실투자금 필터링 - 실투자금: {investment}, 조건값: {investment_val}, 조건: {data['investment_condition']}")
-                    
-                    if data['investment_condition'] == 'above' and investment < investment_val:
+                    if search_conditions['investment_condition'] == 'above' and investment < investment_val:
                         should_include = False
                         filter_reasons.append(f"실투자금 {investment} < {investment_val}")
-                    elif data['investment_condition'] == 'below' and investment > investment_val:
+                    elif search_conditions['investment_condition'] == 'below' and investment > investment_val:
                         should_include = False
                         filter_reasons.append(f"실투자금 {investment} > {investment_val}")
                 except Exception as e:
                     logger.warning(f"Investment parsing error: {e}")
-                    investment = 0
             
             # 토지면적 조건
-            if data.get('area_value', '').strip() and data.get('area_condition') != 'all':
-                area = fields.get('토지면적(㎡)', 0)
+            if should_include and search_conditions.get('area_value', '').strip() and search_conditions.get('area_condition') != 'all':
+                area_raw = fields.get('토지면적(㎡)', 0)
                 try:
-                    if isinstance(area, str):
-                        area = float(area.replace(',', ''))
+                    if isinstance(area_raw, str):
+                        area = float(area_raw.replace(',', ''))
                     else:
-                        area = float(area) if area else 0
+                        area = float(area_raw) if area_raw else 0
                     
-                    area_val = float(data['area_value'])
+                    area_val = float(search_conditions['area_value'])
                     
-                    logger.debug(f"토지면적 필터링 - 면적: {area}, 조건값: {area_val}, 조건: {data['area_condition']}")
-                    
-                    if data['area_condition'] == 'above' and area < area_val:
+                    if search_conditions['area_condition'] == 'above' and area < area_val:
                         should_include = False
                         filter_reasons.append(f"토지면적 {area} < {area_val}")
-                    elif data['area_condition'] == 'below' and area > area_val:
+                    elif search_conditions['area_condition'] == 'below' and area > area_val:
                         should_include = False
                         filter_reasons.append(f"토지면적 {area} > {area_val}")
                 except Exception as e:
                     logger.warning(f"Area parsing error: {e}")
-                    area = 0
             
             # 사용승인일 조건
-            if data.get('approval_date', '').strip() and data.get('approval_condition') != 'all':
+            if should_include and search_conditions.get('approval_date', '').strip() and search_conditions.get('approval_condition') != 'all':
                 approval = fields.get('사용승인일', '')
                 try:
                     if approval and approval.strip():
                         approval_datetime = datetime.strptime(approval.strip(), '%Y-%m-%d')
-                        target_datetime = datetime.strptime(data['approval_date'], '%Y-%m-%d')
+                        target_datetime = datetime.strptime(search_conditions['approval_date'], '%Y-%m-%d')
                         
-                        logger.debug(f"승인일 필터링 - 승인일: {approval}, 조건일: {data['approval_date']}, 조건: {data['approval_condition']}")
-                        
-                        if data['approval_condition'] == 'before' and approval_datetime >= target_datetime:
+                        if search_conditions['approval_condition'] == 'before' and approval_datetime >= target_datetime:
                             should_include = False
-                            filter_reasons.append(f"사용승인일 {approval} >= {data['approval_date']}")
-                        elif data['approval_condition'] == 'after' and approval_datetime <= target_datetime:
+                            filter_reasons.append(f"사용승인일 {approval} >= {search_conditions['approval_date']}")
+                        elif search_conditions['approval_condition'] == 'after' and approval_datetime <= target_datetime:
                             should_include = False
-                            filter_reasons.append(f"사용승인일 {approval} <= {data['approval_date']}")
+                            filter_reasons.append(f"사용승인일 {approval} <= {search_conditions['approval_date']}")
                 except Exception as e:
                     logger.warning(f"Date parsing error: {e}, approval date: {approval}")
             
             if not should_include:
                 condition_filtered_count += 1
-                logger.debug(f"Record filtered out: {fields.get('지번 주소', 'Unknown')} - Reasons: {filter_reasons}")
+                if i < 10:  # 처음 10개만 로그
+                    logger.info(f"Record {i} filtered out: {fields.get('지번 주소', 'Unknown')} - Reasons: {filter_reasons}")
             else:
                 filtered_records.append(record)
         
@@ -456,6 +466,7 @@ def search_map():
         logger.info(f"  - Condition filtered: {condition_filtered_count}")
         logger.info(f"  - Passed filter: {len(filtered_records)}")
         
+        # 나머지 코드는 동일...
         # 지도 생성
         folium_map = folium.Map(location=[37.4834458778777, 126.970207234818], zoom_start=15)
         
@@ -485,9 +496,7 @@ def search_map():
                     result = geo_data["response"]["result"]
                     lat = float(result["point"]["y"])
                     lon = float(result["point"]["x"])
-                    logger.debug(f"Geocoding success for {address}: {lat}, {lon}")
                 else:
-                    logger.warning(f"Geocoding failed for {address}: {geo_data}")
                     geocoding_failed_count += 1
                     continue
             except Exception as e:
