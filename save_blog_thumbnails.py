@@ -1,52 +1,44 @@
 import os
-import re
-import requests
 import feedparser
-from urllib.parse import urlparse
-from datetime import datetime
+from bs4 import BeautifulSoup
+import requests
+from urllib.parse import urlparse, parse_qs
 
-# 저장 경로
-SAVE_DIR = "/home/sftpuser/www/blog_thumbnails/"
-RSS_FEED_URL = "https://rss.blog.naver.com/goldenrabbit7377.xml"
+feed_url = "https://rss.blog.naver.com/goldenrabbit7377.xml"
+save_dir = "/home/sftpuser/www/blog_thumbs"
+os.makedirs(save_dir, exist_ok=True)
 
-# 디렉토리 생성
-os.makedirs(SAVE_DIR, exist_ok=True)
-
-# RSS 파싱
-feed = feedparser.parse(RSS_FEED_URL)
-print(f"{len(feed.entries)}개의 글을 찾았습니다.")
+def extract_log_no(link):
+    parsed = urlparse(link)
+    return parse_qs(parsed.query).get('logNo', [None])[0]
 
 def extract_image_url(summary):
-    """ summary에서 이미지 URL 추출 """
-    match = re.search(r'<img[^>]+src="([^"]+)"', summary)
-    return match.group(1) if match else None
+    soup = BeautifulSoup(summary, 'html.parser')
+    img = soup.find('img')
+    return img['src'] if img and 'src' in img.attrs else None
 
-def sanitize_filename(url):
-    """ URL에서 파일명 추출 후 안전하게 변경 """
-    parsed = urlparse(url)
-    filename = os.path.basename(parsed.path)
-    filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
-    return filename
+feed = feedparser.parse(feed_url)
 
-# 썸네일 저장
-for i, entry in enumerate(feed.entries[:10]):
+for entry in feed.entries[:10]:
+    log_no = extract_log_no(entry.link)
+    if not log_no:
+        continue
+
     image_url = extract_image_url(entry.summary)
     if not image_url:
-        print(f"[{i}] 이미지 없음 - {entry.title}")
         continue
 
-    filename = sanitize_filename(image_url)
-    save_path = os.path.join(SAVE_DIR, filename)
-
-    if os.path.exists(save_path):
-        print(f"[{i}] 이미 존재함 - {filename}")
-        continue
+    file_path = os.path.join(save_dir, f"{log_no}.jpg")
+    if os.path.exists(file_path):
+        continue  # 이미 저장된 경우 건너뜀
 
     try:
-        response = requests.get(image_url, timeout=10)
-        response.raise_for_status()
-        with open(save_path, 'wb') as f:
-            f.write(response.content)
-        print(f"[{i}] 저장 완료 - {filename}")
+        r = requests.get(image_url, timeout=10)
+        if r.status_code == 200:
+            with open(file_path, 'wb') as f:
+                f.write(r.content)
+            print(f"✅ Saved: {file_path}")
+        else:
+            print(f"❌ Failed ({r.status_code}): {image_url}")
     except Exception as e:
-        print(f"[{i}] 실패 - {filename} ({e})")
+        print(f"⚠️ Error fetching {image_url}: {e}")
