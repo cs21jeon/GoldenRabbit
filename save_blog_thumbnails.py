@@ -1,44 +1,44 @@
-import os
 import feedparser
-from bs4 import BeautifulSoup
+import os
+import re
 import requests
-from urllib.parse import urlparse, parse_qs
+from bs4 import BeautifulSoup
 
-feed_url = "https://rss.blog.naver.com/goldenrabbit7377.xml"
-save_dir = "/home/sftpuser/www/blog_thumbs"
+# 썸네일 저장 경로
+save_dir = '/home/sftpuser/www/blog_thumbs/'
 os.makedirs(save_dir, exist_ok=True)
 
-def extract_log_no(link):
-    parsed = urlparse(link)
-    return parse_qs(parsed.query).get('logNo', [None])[0]
-
-def extract_image_url(summary):
-    soup = BeautifulSoup(summary, 'html.parser')
-    img = soup.find('img')
-    return img['src'] if img and 'src' in img.attrs else None
-
+# 네이버 블로그 RSS URL
+feed_url = 'https://rss.blog.naver.com/goldenrabbit7377.xml'
 feed = feedparser.parse(feed_url)
 
-for entry in feed.entries[:10]:
-    log_no = extract_log_no(entry.link)
-    if not log_no:
+for entry in feed.entries[:10]:  # 최신 10개 가져오기
+    # logNo 추출
+    match = re.search(r'logNo=(\d+)', entry.link)
+    if not match:
+        print(f"❌ logNo 추출 실패: {entry.link}")
         continue
 
-    image_url = extract_image_url(entry.summary)
-    if not image_url:
-        continue
+    log_no = match.group(1)
+    image_filename = f"{log_no}.jpg"
+    save_path = os.path.join(save_dir, image_filename)
 
-    file_path = os.path.join(save_dir, f"{log_no}.jpg")
-    if os.path.exists(file_path):
-        continue  # 이미 저장된 경우 건너뜀
+    # entry.summary에서 <img> 추출
+    soup = BeautifulSoup(entry.summary, 'html.parser')
+    img_tag = soup.find('img')
 
-    try:
-        r = requests.get(image_url, timeout=10)
-        if r.status_code == 200:
-            with open(file_path, 'wb') as f:
-                f.write(r.content)
-            print(f"✅ Saved: {file_path}")
-        else:
-            print(f"❌ Failed ({r.status_code}): {image_url}")
-    except Exception as e:
-        print(f"⚠️ Error fetching {image_url}: {e}")
+    if img_tag and 'src' in img_tag.attrs:
+        img_url = img_tag['src']
+        print(f"✅ 이미지 저장 중: {image_filename} ← {img_url}")
+
+        try:
+            img_data = requests.get(img_url, timeout=5)
+            if img_data.status_code == 200:
+                with open(save_path, 'wb') as f:
+                    f.write(img_data.content)
+            else:
+                print(f"❌ 다운로드 실패: {img_url}")
+        except Exception as e:
+            print(f"❌ 예외 발생: {e}")
+    else:
+        print(f"❌ 이미지 없음: {entry.title}")
