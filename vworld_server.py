@@ -279,9 +279,12 @@ def search_map():
         # 데이터 처리
         airtable_data = response.json()
         all_records = airtable_data.get('records', [])
-        logger.info(f"Total records: {len(all_records)}")
+        logger.info(f"Total records from Airtable: {len(all_records)}")
         
         filtered_records = []
+        status_filtered_count = 0
+        condition_filtered_count = 0
+        geocoding_failed_count = 0
         
         for record in all_records:
             fields = record.get('fields', {})
@@ -299,10 +302,12 @@ def search_map():
             
             # 유효한 상태가 아니면 건너뛰기
             if not is_valid_status:
+                status_filtered_count += 1
                 continue
             
             # 각 조건 확인
             should_include = True
+            filter_reasons = []
             
             # 매가 조건
             if data.get('price_value') and data.get('price_condition') != 'all':
@@ -312,53 +317,65 @@ def search_map():
                     price_val = float(data['price_value'])
                     if data['price_condition'] == 'above' and price < price_val:
                         should_include = False
+                        filter_reasons.append(f"가격 {price} < {price_val}")
                     elif data['price_condition'] == 'below' and price > price_val:
                         should_include = False
+                        filter_reasons.append(f"가격 {price} > {price_val}")
                 except Exception as e:
                     logger.warning(f"Price parsing error: {e}")
                     should_include = False
+                    filter_reasons.append(f"가격 파싱 오류")
             
             # 실투자금 조건
-            if data.get('investment_value') and data.get('investment_condition') != 'all':
+            if should_include and data.get('investment_value') and data.get('investment_condition') != 'all':
                 investment = fields.get('실투자금', 0)
                 try:
                     investment = float(investment) if investment else 0
                     investment_val = float(data['investment_value'])
                     if data['investment_condition'] == 'above' and investment < investment_val:
                         should_include = False
+                        filter_reasons.append(f"실투자금 {investment} < {investment_val}")
                     elif data['investment_condition'] == 'below' and investment > investment_val:
                         should_include = False
+                        filter_reasons.append(f"실투자금 {investment} > {investment_val}")
                 except:
                     should_include = False
+                    filter_reasons.append("실투자금 파싱 오류")
             
             # 수익률 조건
-            if data.get('yield_value') and data.get('yield_condition') != 'all':
+            if should_include and data.get('yield_value') and data.get('yield_condition') != 'all':
                 yield_rate = fields.get('융자제외수익률(%)', 0)
                 try:
                     yield_rate = float(yield_rate) if yield_rate else 0
                     yield_val = float(data['yield_value'])
                     if data['yield_condition'] == 'above' and yield_rate < yield_val:
                         should_include = False
+                        filter_reasons.append(f"수익률 {yield_rate} < {yield_val}")
                     elif data['yield_condition'] == 'below' and yield_rate > yield_val:
                         should_include = False
+                        filter_reasons.append(f"수익률 {yield_rate} > {yield_val}")
                 except:
                     should_include = False
+                    filter_reasons.append("수익률 파싱 오류")
             
             # 토지면적 조건
-            if data.get('area_value') and data.get('area_condition') != 'all':
+            if should_include and data.get('area_value') and data.get('area_condition') != 'all':
                 area = fields.get('토지면적(㎡)', 0)
                 try:
                     area = float(area) if area else 0
                     area_val = float(data['area_value'])
                     if data['area_condition'] == 'above' and area < area_val:
                         should_include = False
+                        filter_reasons.append(f"토지면적 {area} < {area_val}")
                     elif data['area_condition'] == 'below' and area > area_val:
                         should_include = False
+                        filter_reasons.append(f"토지면적 {area} > {area_val}")
                 except:
                     should_include = False
+                    filter_reasons.append("토지면적 파싱 오류")
             
             # 사용승인일 조건
-            if data.get('approval_date') and data.get('approval_condition') != 'all':
+            if should_include and data.get('approval_date') and data.get('approval_condition') != 'all':
                 approval = fields.get('사용승인일', '')
                 try:
                     if approval:
@@ -367,16 +384,26 @@ def search_map():
                         
                         if data['approval_condition'] == 'before' and approval_datetime >= target_datetime:
                             should_include = False
+                            filter_reasons.append(f"사용승인일 {approval} >= {data['approval_date']}")
                         elif data['approval_condition'] == 'after' and approval_datetime <= target_datetime:
                             should_include = False
+                            filter_reasons.append(f"사용승인일 {approval} <= {data['approval_date']}")
                 except Exception as e:
                     logger.warning(f"Date parsing error: {e}")
                     should_include = False
+                    filter_reasons.append("날짜 파싱 오류")
             
-            if should_include:
+            if not should_include:
+                condition_filtered_count += 1
+                logger.debug(f"Record filtered out: {fields.get('지번 주소', 'Unknown')} - Reasons: {filter_reasons}")
+            else:
                 filtered_records.append(record)
         
-        logger.info(f"Filtered records: {len(filtered_records)}")
+        logger.info(f"Filtering summary:")
+        logger.info(f"  - Total records: {len(all_records)}")
+        logger.info(f"  - Status filtered: {status_filtered_count}")
+        logger.info(f"  - Condition filtered: {condition_filtered_count}")
+        logger.info(f"  - Passed filter: {len(filtered_records)}")
         
         # 지도 생성
         folium_map = folium.Map(location=[37.4834458778777, 126.970207234818], zoom_start=15)
@@ -397,6 +424,7 @@ def search_map():
             record_id = record.get('id')
             
             if not address:
+                logger.warning("No address found in record")
                 continue
                 
             # 주소 지오코딩
@@ -406,10 +434,14 @@ def search_map():
                     result = geo_data["response"]["result"]
                     lat = float(result["point"]["y"])
                     lon = float(result["point"]["x"])
+                    logger.debug(f"Geocoding success for {address}: {lat}, {lon}")
                 else:
+                    logger.warning(f"Geocoding failed for {address}: {geo_data}")
+                    geocoding_failed_count += 1
                     continue
             except Exception as e:
                 logger.warning(f"Geocoding error for {address}: {e}")
+                geocoding_failed_count += 1
                 continue
             
             # 가격 표시 형식
@@ -472,13 +504,22 @@ def search_map():
             added_markers += 1
         
         logger.info(f"Added {added_markers} markers to the map")
+        logger.info(f"Geocoding failed for {geocoding_failed_count} addresses")
         
         # HTML 문자열로 반환
         map_html = folium_map._repr_html_()
         
         return jsonify({
             "map_html": map_html,
-            "count": len(filtered_records)
+            "count": len(filtered_records),
+            "statistics": {
+                "total_records": len(all_records),
+                "status_filtered": status_filtered_count,
+                "condition_filtered": condition_filtered_count,
+                "passed_filter": len(filtered_records),
+                "geocoding_failed": geocoding_failed_count,
+                "markers_added": added_markers
+            }
         })
         
     except Exception as e:
