@@ -245,7 +245,7 @@ def search_map():
         airtable_key = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
         table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
-        view_id = os.environ.get("AIRTABLE_VIEW_ID", "viwyV15T4ihMpbDbr")
+        view_id = os.environ.get("AIRTABLE_ALL_VIEW_ID", "viwyV15T4ihMpbDbr")
         
         if not airtable_key:
             logger.error("AIRTABLE_API_KEY not set")
