@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, make_response
 import requests
 import os
+import re
 import json
 from dotenv import load_dotenv
 from flask_cors import CORS
@@ -9,6 +10,7 @@ from functools import lru_cache
 import anthropic  # Claude API를 위한 패키지 추가
 import feedparser  # 네이버 블로그 RSS를 파싱하기 위해 필요
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 # 환경 변수 로드
 load_dotenv()
@@ -27,6 +29,22 @@ blog_cache = {
     "timestamp": None,
     "posts": []
 }
+
+# 썸네일 저장 디렉토리
+THUMBNAIL_DIR = "/home/sftpuser/www/blog_thumbnails"
+THUMBNAIL_URL_BASE = "/blog_thumbnails"  # static 경로
+
+def extract_image_url(summary):
+    """ summary에서 첫 번째 이미지 URL 추출 """
+    match = re.search(r'<img[^>]+src="([^"]+)"', summary)
+    return match.group(1) if match else None
+
+def sanitize_filename(url):
+    """ 이미지 URL을 안전한 파일명으로 변환 """
+    parsed = urlparse(url)
+    filename = os.path.basename(parsed.path)
+    filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+    return filename
 
 # Anthropic API 키 설정
 anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
@@ -841,23 +859,28 @@ def blog_feed():
     now = datetime.now()
     cache_duration = timedelta(hours=24)
 
-    # 캐시가 있고, 24시간 이내이면 재사용
+    # 캐시 재사용 조건
     if blog_cache["timestamp"] and now - blog_cache["timestamp"] < cache_duration:
         return jsonify(blog_cache["posts"])
 
-    feed_url = "https://rss.blog.naver.com/goldenrabbit7377.xml"  
+    # 최신 블로그 RSS 파싱
+    feed_url = "https://rss.blog.naver.com/goldenrabbit7377.xml"
     feed = feedparser.parse(feed_url)
 
     posts = []
-    for entry in feed.entries[:10]:  # ✨ 최신 10개까지 가져오기
+    for entry in feed.entries[:10]:
+        img_url = extract_image_url(entry.summary)
+        filename = sanitize_filename(img_url) if img_url else None
+        local_thumbnail_url = f"{THUMBNAIL_URL_BASE}/{filename}" if filename and os.path.exists(os.path.join(THUMBNAIL_DIR, filename)) else None
+
         posts.append({
             "title": entry.title,
             "link": entry.link,
             "summary": entry.summary,
-            "published": entry.published
+            "published": entry.published,
+            "thumbnail": local_thumbnail_url  # 썸네일 경로 추가
         })
 
-    # 캐시 저장
     blog_cache["timestamp"] = now
     blog_cache["posts"] = posts
 
