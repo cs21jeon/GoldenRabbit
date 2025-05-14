@@ -676,6 +676,7 @@ def property_search():
         valid_status = ["네이버", "디스코", "당근", "비공개"]
         valid_record_count = 0
 
+        # 매물 정보 구조화 부분 수정
         for record in all_records:
             fields = record.get('fields', {})
             
@@ -695,14 +696,34 @@ def property_search():
                 
             valid_record_count += 1
             
-            # 매물 정보 구조화 (필요한 필드만 추출)
+            # 가격 필드 처리 - 만원 단위를 억원으로 변환
+            price_raw = fields.get('매가(만원)', 0)
+            try:
+                price_in_man = float(price_raw) if price_raw else 0
+                # 억원으로 변환
+                price_in_eok = price_in_man / 10000 if price_in_man >= 10000 else price_in_man / 10000
+                price_display = f"{price_in_eok:.1f}억원" if price_in_man >= 10000 else f"{int(price_in_man)}만원"
+            except:
+                price_in_man = 0
+                price_display = "가격정보없음"
+            
+            # 수익률 처리
+            yield_rate = fields.get('융자제외수익률(%)', '')
+            try:
+                yield_rate = float(yield_rate) if yield_rate else 0
+                yield_display = f"{yield_rate}%"
+            except:
+                yield_display = "정보없음"
+            
+            # 매물 정보 구조화 (AI가 이해하기 쉽게 변환)
             property_info = {
                 "id": record.get('레코드id', ''),
                 "address": fields.get('지번 주소', ''),
-                "price": fields.get('매가(만원)', ''),
+                "price": price_display,  # 이미 변환된 가격
+                "price_raw": price_in_man,  # 원본 만원 단위 값
                 "actual_investment": fields.get('실투자금', ''),
                 "monthly_income": fields.get('월세(만원)', ''),
-                "yield": fields.get('융자제외수익률(%)', ''),
+                "yield": yield_display,  # 이미 변환된 수익률
                 "property_type": fields.get('주용도', ''),
                 "area": fields.get('토지면적(㎡)', '')
             }
@@ -723,7 +744,7 @@ def property_search():
         if len(properties) > 15:
             logger.info(f"Limiting properties for AI from {len(properties)} to 15")
         
-        # Claude에 전송할 프롬프트 구성
+        # Claude에 전송할 프롬프트 수정
         prompt = f"""
         다음은 부동산 매물 목록입니다 (전체 {len(properties)}개 중 {len(properties_for_ai)}개):
         {json.dumps(properties_for_ai, ensure_ascii=False, indent=2)}
@@ -734,13 +755,20 @@ def property_search():
         - 실투자금: {investment}
         - 희망투자수익률: {expected_yield}
         
-        위 조건에 가장 적합한 매물 2-3개를 추천해주세요. 각 매물에 대해 다음 형식으로 답변해주세요:
+        위 조건에 가장 적합한 매물 2-3개를 추천해주세요. 
+        
+        주의사항:
+        - 위 목록의 'price' 필드는 이미 한글로 표시된 가격입니다 (예: "25.0억원", "8000만원")
+        - 이 가격을 그대로 사용하세요. 추가 변환이 필요없습니다.
+        - 'yield' 필드도 이미 "%"가 포함되어 있습니다.
+        
+        각 매물에 대해 다음 형식으로 답변해주세요:
         
         매물 1:
         위치: [주소]
-        가격: [매매가]
+        가격: [price 필드 값 그대로]
         주용도: [주용도]
-        수익률: [수익률]
+        수익률: [yield 필드 값 그대로]
         추천 이유: [이 사용자에게 왜 이 매물이 적합한지 간단히 설명]
         
         매물 2: ...
@@ -758,7 +786,7 @@ def property_search():
         response = claude_client.messages.create(
             model="claude-3-7-sonnet-20250219",
             max_tokens=1000,
-            system="당신은 부동산 투자 전문가입니다. 사용자의 조건에 맞는 최적의 매물을 추천해주세요. 만일 딱 맞는 조건이 없다면 가장 근접한 조건으로 선택해 주세요. 참고로 자료에 나타난 단위는 모두 만원 단위야. 예를들어 150000은 15억원과 같이",
+            system="당신은 부동산 투자 전문가입니다. 사용자의 조건에 맞는 최적의 매물을 추천해주세요. 제공된 데이터의 가격과 수익률은 이미 올바른 형식으로 변환되어 있으므로, 추가 계산이나 변환 없이 그대로 사용하세요.",
             messages=[
                 {"role": "user", "content": prompt}
             ]
