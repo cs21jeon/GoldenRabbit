@@ -580,63 +580,61 @@ def search_map():
         return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
 
 # AI 물건 검색 기능 추가
-@app.route('/api/search-map', methods=['POST'])
-def search_map():
-    """검색 조건에 따른 동적 지도 생성"""
+@app.route('/api/property-search', methods=['POST'])
+def property_search():
     try:
-        import folium
-        from datetime import datetime
-        
-        # 검색 조건 받기
+        # Anthropic API 키 확인
+        if not anthropic_api_key:
+            logger.error("ANTHROPIC_API_KEY environment variable is not set")
+            return jsonify({"error": "AI API key not configured"}), 500
+            
+        # 사용자 입력 받기
         data = request.json
-        logger.info(f"Search conditions: {data}")
+        location = data.get('location', '')
+        price_range = data.get('price_range', '')
+        investment = data.get('investment', '')
+        expected_yield = data.get('expected_yield', '')
         
-        # Airtable에서 데이터 가져오기 (환경 변수에서 읽기)
+        logger.info(f"AI property search request: location={location}, price_range={price_range}, investment={investment}, expected_yield={expected_yield}")
+        
+        # Airtable에서 매물 데이터 가져오기
         airtable_key = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
         table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
-        view_id = os.environ.get("AIRTABLE_ALL_VIEW_ID")  # "AIRTABLE_ALL_VIEW_ID"로 수정
-        
-        logger.info(f"Using view ID: {view_id}")
+        view_id = os.environ.get("AIRTABLE_ALL_VIEW_ID", "viwyV15T4ihMpbDbr")
         
         if not airtable_key:
-            logger.error("AIRTABLE_API_KEY not set")
             return jsonify({"error": "Airtable API key not set"}), 500
             
         headers = {
             "Authorization": f"Bearer {airtable_key}"
         }
         
-        # 뷰 ID를 URL 파라미터로 추가
-        base_url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
-        
         # 모든 레코드 가져오기 (페이지네이션 처리)
         all_records = []
         offset = None
         page_count = 0
         
-        while True:
-            url = base_url
-            params = {}
-            
-            if view_id:
-                params['view'] = view_id
-            
-            if offset:
-                params['offset'] = offset
+        base_url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
+        
+        try:
+            while True:
+                params = {}
                 
-            logger.info(f"Fetching page {page_count + 1}, offset: {offset}")
-            
-            try:
-                response = requests.get(url, headers=headers, params=params)
+                if view_id:
+                    params['view'] = view_id
+                
+                if offset:
+                    params['offset'] = offset
+                
+                logger.info(f"Fetching page {page_count + 1}, offset: {offset}")
+                
+                response = requests.get(base_url, headers=headers, params=params)
                 
                 if response.status_code != 200:
-                    logger.error(f"Airtable API error: {response.status_code}")
-                    return jsonify({
-                        "error": "Airtable data fetch failed",
-                        "details": response.text
-                    }), response.status_code
-                    
+                    logger.error(f"Failed to fetch properties: {response.text}")
+                    return jsonify({"error": "Failed to fetch property data"}), 500
+                
                 data = response.json()
                 records = data.get('records', [])
                 all_records.extend(records)
@@ -649,38 +647,31 @@ def search_map():
                 if not offset:
                     break
                     
-            except Exception as e:
-                logger.error(f"Request error: {str(e)}")
-                return jsonify({"error": f"Request error: {str(e)}"}), 500
+        except Exception as e:
+            logger.error(f"Request error: {str(e)}")
+            return jsonify({"error": f"Request error: {str(e)}"}), 500
         
-        logger.info(f"Total records from Airtable: {len(all_records)} (in {page_count} pages)")
+        # 레코드 수 로깅
+        total_record_count = len(all_records)
+        logger.info(f"Total records received from Airtable: {total_record_count} (in {page_count} pages)")
+
+        # 첫 번째 레코드의 필드명 로깅
+        if total_record_count > 0:
+            first_record = all_records[0]
+            logger.info(f"Sample record ID: {first_record.get('id')}")
+            logger.info(f"Available fields: {', '.join(first_record.get('fields', {}).keys())}")
         
-        filtered_records = []
-        status_filtered_count = 0
-        condition_filtered_count = 0
-        geocoding_failed_count = 0
+        properties = []
         
-        # 검색 조건 로그
-        active_filters = []
-        if data.get('price_value', '').strip():
-            active_filters.append(f"가격 {data['price_condition']} {data['price_value']}")
-        if data.get('yield_value', '').strip():
-            active_filters.append(f"수익률 {data['yield_condition']} {data['yield_value']}")
-        if data.get('investment_value', '').strip():
-            active_filters.append(f"실투자금 {data['investment_condition']} {data['investment_value']}")
-        if data.get('area_value', '').strip():
-            active_filters.append(f"토지면적 {data['area_condition']} {data['area_value']}")
-        if data.get('approval_date', '').strip():
-            active_filters.append(f"사용승인일 {data['approval_condition']} {data['approval_date']}")
-        
-        logger.info(f"Active filters: {', '.join(active_filters) if active_filters else 'None'}")
-        
-        for i, record in enumerate(all_records):
+        # 현황 필드 필터링 추가
+        valid_status = ["네이버", "디스코", "당근", "비공개"]
+        valid_record_count = 0
+
+        for record in all_records:
             fields = record.get('fields', {})
             
             # 현황 필드 확인
             status = fields.get('현황')
-            valid_status = ["네이버", "디스코", "당근", "비공개"]
             is_valid_status = False
             
             if status:
@@ -691,270 +682,93 @@ def search_map():
             
             # 유효한 상태가 아니면 건너뛰기
             if not is_valid_status:
-                status_filtered_count += 1
-                continue
-            
-            # 각 조건 확인 - AND 조건으로 처리
-            should_include = True
-            filter_reasons = []
-            
-            # 디버깅을 위해 처음 5개 레코드의 값을 로그로 출력
-            if i < 5:
-                logger.debug(f"Record {i} - 주소: {fields.get('지번 주소', '')}")
-                logger.debug(f"  매가: {fields.get('매가(만원)', '')}")
-                logger.debug(f"  수익률: {fields.get('융자제외수익률(%)', '')}")
-                logger.debug(f"  실투자금: {fields.get('실투자금', '')}")
-                logger.debug(f"  토지면적: {fields.get('토지면적(㎡)', '')}")
-                logger.debug(f"  사용승인일: {fields.get('사용승인일', '')}")
-            
-            # 매가 조건
-            if data.get('price_value', '').strip() and data.get('price_condition') != 'all':
-                price_raw = fields.get('매가(만원)', 0)
-                try:
-                    # 다양한 형식의 가격 데이터 처리
-                    if isinstance(price_raw, str):
-                        price = float(price_raw.replace(',', '').replace('만원', '').strip())
-                    else:
-                        price = float(price_raw) if price_raw else 0
-                    
-                    price_val = float(data['price_value'])
-                    
-                    if i < 5:  # 디버깅
-                        logger.debug(f"  가격 필터링: {price} {data['price_condition']} {price_val}")
-                    
-                    if data['price_condition'] == 'above' and price < price_val:
-                        should_include = False
-                        filter_reasons.append(f"가격 {price} < {price_val}")
-                    elif data['price_condition'] == 'below' and price > price_val:
-                        should_include = False
-                        filter_reasons.append(f"가격 {price} > {price_val}")
-                except Exception as e:
-                    logger.warning(f"Price parsing error for record {i}: {e}, raw value: {price_raw}")
-            
-            # 수익률 조건
-            if should_include and data.get('yield_value', '').strip() and data.get('yield_condition') != 'all':
-                yield_raw = fields.get('융자제외수익률(%)', 0)
-                try:
-                    if isinstance(yield_raw, str):
-                        yield_rate = float(yield_raw.replace(',', '').replace('%', '').strip())
-                    else:
-                        yield_rate = float(yield_raw) if yield_raw else 0
-                    
-                    yield_val = float(data['yield_value'])
-                    
-                    if i < 5:  # 디버깅
-                        logger.debug(f"  수익률 필터링: {yield_rate} {data['yield_condition']} {yield_val}")
-                    
-                    if data['yield_condition'] == 'above' and yield_rate < yield_val:
-                        should_include = False
-                        filter_reasons.append(f"수익률 {yield_rate} < {yield_val}")
-                    elif data['yield_condition'] == 'below' and yield_rate > yield_val:
-                        should_include = False
-                        filter_reasons.append(f"수익률 {yield_rate} > {yield_val}")
-                except Exception as e:
-                    logger.warning(f"Yield parsing error for record {i}: {e}, raw value: {yield_raw}")
-            
-            # 실투자금 조건
-            if should_include and data.get('investment_value', '').strip() and data.get('investment_condition') != 'all':
-                investment_raw = fields.get('실투자금', 0)
-                try:
-                    if isinstance(investment_raw, str):
-                        investment = float(investment_raw.replace(',', '').strip())
-                    else:
-                        investment = float(investment_raw) if investment_raw else 0
-                    
-                    investment_val = float(data['investment_value'])
-                    
-                    if i < 5:  # 디버깅
-                        logger.debug(f"  실투자금 필터링: {investment} {data['investment_condition']} {investment_val}")
-                    
-                    if data['investment_condition'] == 'above' and investment < investment_val:
-                        should_include = False
-                        filter_reasons.append(f"실투자금 {investment} < {investment_val}")
-                    elif data['investment_condition'] == 'below' and investment > investment_val:
-                        should_include = False
-                        filter_reasons.append(f"실투자금 {investment} > {investment_val}")
-                except Exception as e:
-                    logger.warning(f"Investment parsing error for record {i}: {e}, raw value: {investment_raw}")
-            
-            # 토지면적 조건
-            if should_include and data.get('area_value', '').strip() and data.get('area_condition') != 'all':
-                area_raw = fields.get('토지면적(㎡)', 0)
-                try:
-                    if isinstance(area_raw, str):
-                        area = float(area_raw.replace(',', '').strip())
-                    else:
-                        area = float(area_raw) if area_raw else 0
-                    
-                    area_val = float(data['area_value'])
-                    
-                    if i < 5:  # 디버깅
-                        logger.debug(f"  토지면적 필터링: {area} {data['area_condition']} {area_val}")
-                    
-                    if data['area_condition'] == 'above' and area < area_val:
-                        should_include = False
-                        filter_reasons.append(f"토지면적 {area} < {area_val}")
-                    elif data['area_condition'] == 'below' and area > area_val:
-                        should_include = False
-                        filter_reasons.append(f"토지면적 {area} > {area_val}")
-                except Exception as e:
-                    logger.warning(f"Area parsing error for record {i}: {e}, raw value: {area_raw}")
-            
-            # 사용승인일 조건
-            if should_include and data.get('approval_date', '').strip() and data.get('approval_condition') != 'all':
-                approval = fields.get('사용승인일', '')
-                try:
-                    if approval and approval.strip():
-                        approval_datetime = datetime.strptime(approval.strip(), '%Y-%m-%d')
-                        target_datetime = datetime.strptime(data['approval_date'], '%Y-%m-%d')
-                        
-                        if i < 5:  # 디버깅
-                            logger.debug(f"  승인일 필터링: {approval} {data['approval_condition']} {data['approval_date']}")
-                        
-                        if data['approval_condition'] == 'before' and approval_datetime >= target_datetime:
-                            should_include = False
-                            filter_reasons.append(f"사용승인일 {approval} >= {data['approval_date']}")
-                        elif data['approval_condition'] == 'after' and approval_datetime <= target_datetime:
-                            should_include = False
-                            filter_reasons.append(f"사용승인일 {approval} <= {data['approval_date']}")
-                except Exception as e:
-                    logger.warning(f"Date parsing error for record {i}: {e}, approval date: {approval}")
-            
-            if not should_include:
-                condition_filtered_count += 1
-                if i < 10:  # 처음 10개만 로그
-                    logger.info(f"Record {i} filtered out: {fields.get('지번 주소', 'Unknown')} - Reasons: {filter_reasons}")
-            else:
-                filtered_records.append(record)
-        
-        logger.info(f"Filtering summary:")
-        logger.info(f"  - Total records: {len(all_records)}")
-        logger.info(f"  - Status filtered: {status_filtered_count}")
-        logger.info(f"  - Condition filtered: {condition_filtered_count}")
-        logger.info(f"  - Passed filter: {len(filtered_records)}")
-        
-        # 지도 생성
-        folium_map = folium.Map(location=[37.4834458778777, 126.970207234818], zoom_start=15)
-        
-        # 타일 레이어 추가
-        folium.TileLayer(
-            tiles='https://goldenrabbit.biz/api/vtile?z={z}&y={y}&x={x}',
-            attr='공간정보 오픈플랫폼(브이월드)',
-            name='브이월드 배경지도',
-        ).add_to(folium_map)
-        
-        # 마커 추가
-        added_markers = 0
-        for record in filtered_records:
-            fields = record.get('fields', {})
-            address = fields.get('지번 주소')
-            price = fields.get('매가(만원)')
-            record_id = record.get('id')
-            
-            if not address:
-                logger.warning("No address found in record")
                 continue
                 
-            # 주소 지오코딩
-            try:
-                geo_data, _ = get_geocode(address)
-                if geo_data.get("response", {}).get("status") == "OK":
-                    result = geo_data["response"]["result"]
-                    lat = float(result["point"]["y"])
-                    lon = float(result["point"]["x"])
-                    logger.debug(f"Geocoding success for {address}: {lat}, {lon}")
-                else:
-                    logger.warning(f"Geocoding failed for {address}: {geo_data}")
-                    geocoding_failed_count += 1
-                    continue
-            except Exception as e:
-                logger.warning(f"Geocoding error for {address}: {e}")
-                geocoding_failed_count += 1
-                continue
+            valid_record_count += 1
             
-            # 가격 표시 형식
-            try:
-                if isinstance(price, (int, float)):
-                    price_display = f"{int(price):,}만원" if price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.')
-                else:
-                    price_display = "가격정보 없음"
-            except:
-                price_display = "가격정보 없음"
-            
-            # 팝업 HTML
-            popup_html = f"""
-            <div style="font-family: 'Noto Sans KR', sans-serif;">
-                <div style="font-size: 16px; font-weight: bold; margin-bottom: 6px;">{address}</div>
-                <div style="color: #444;">매가: {price_display}</div>
-            """
-            
-            if fields.get('토지면적(㎡)'):
-                try:
-                    sqm = float(fields['토지면적(㎡)'])
-                    pyeong = round(sqm / 3.3058)
-                    popup_html += f'<div style="color: #444;">대지: {pyeong}평 ({sqm}㎡)</div>'
-                except:
-                    pass
-            
-            if fields.get('층수'):
-                popup_html += f'<div style="color: #444;">층수: {fields["층수"]}</div>'
-            
-            if fields.get('주용도'):
-                popup_html += f'<div style="color: #444;">용도: {fields["주용도"]}</div>'
-            
-            # 에어테이블 링크
-            airtable_url = f"https://airtable.com/{base_id}/{table_id}/viwyV15T4ihMpbDbr/{record_id}?blocks=hide"
-            popup_html += f'<a href="{airtable_url}" target="_blank" style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">상세내역보기</a>'
-            popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">이 매물 문의하기</a>'
-            popup_html += "</div>"
-            
-            # 가격 말풍선 아이콘
-            bubble_html = f"""
-            <div style="background-color: #fff; border: 2px solid #e38000; border-radius: 6px; 
-                       box-shadow: 0 2px 5px rgba(0,0,0,0.2); padding: 3px 6px; font-size: 13px; 
-                       font-weight: bold; color: #e38000; white-space: nowrap; text-align: center;">
-                {price_display}
-            </div>
-            """
-            
-            icon = folium.DivIcon(
-                html=bubble_html,
-                icon_size=(100, 40),
-                icon_anchor=(50, 40)
-            )
-            
-            folium.Marker(
-                location=[lat, lon],
-                popup=folium.Popup(popup_html, max_width=250),
-                icon=icon
-            ).add_to(folium_map)
-            
-            added_markers += 1
+            # 매물 정보 구조화 (필요한 필드만 추출)
+            property_info = {
+                "id": record.get('레코드id', ''),
+                "address": fields.get('지번 주소', ''),
+                "price": fields.get('매가(만원)', ''),
+                "actual_investment": fields.get('실투자금', ''),
+                "monthly_income": fields.get('월세(만원)', ''),
+                "yield": fields.get('융자제외수익률(%)', ''),
+                "property_type": fields.get('주용도', ''),
+                "area": fields.get('토지면적(㎡)', '')
+            }
+            properties.append(property_info)
         
-        logger.info(f"Added {added_markers} markers to the map")
-        logger.info(f"Geocoding failed for {geocoding_failed_count} addresses")
+        # 처리된 데이터 로깅
+        logger.info(f"Processed {len(properties)} properties out of {total_record_count} total records")
+        logger.info(f"Valid status records: {valid_record_count}")
         
-        # HTML 문자열로 반환
-        map_html = folium_map._repr_html_()
+        # 첫 번째 처리된 매물 정보 로깅
+        if properties:
+            logger.info(f"Sample processed property: {json.dumps(properties[0], ensure_ascii=False)}")
+        else:
+            logger.warning("No properties were processed successfully")
+
+        # 데이터 양이 너무 많으면 제한
+        properties_for_ai = properties[:15] if len(properties) > 15 else properties
+        if len(properties) > 15:
+            logger.info(f"Limiting properties for AI from {len(properties)} to 15")
+        
+        # Claude에 전송할 프롬프트 구성
+        prompt = f"""
+        다음은 부동산 매물 목록입니다 (전체 {len(properties)}개 중 {len(properties_for_ai)}개):
+        {json.dumps(properties_for_ai, ensure_ascii=False, indent=2)}
+        
+        사용자의 검색 조건:
+        - 지역: {location}
+        - 희망매매가: {price_range}
+        - 실투자금: {investment}
+        - 희망투자수익률: {expected_yield}
+        
+        위 조건에 가장 적합한 매물 2-3개를 추천해주세요. 각 매물에 대해 다음 형식으로 답변해주세요:
+        
+        매물 1:
+        위치: [주소]
+        가격: [매매가]
+        주용도: [주용도]
+        수익률: [수익률]
+        추천 이유: [이 사용자에게 왜 이 매물이 적합한지 간단히 설명]
+        
+        매물 2: ...
+        
+        조건에 맞는 매물이 없으면 '조건에 맞는 매물이 없습니다'라고 답변해주세요.
+
+        결과 출력하는 맨 아래에는 "더 많은 매물이 궁금하시다면 아래 '상담문의'를 남겨주세요.
+        빠른 시일 내에 답변드리겠습니다."라는 문구를 출력해 주세요.
+        
+        참고: 검색 가능한 전체 매물은 {len(properties)}개입니다.
+        """
+        
+        # Claude API 호출
+        logger.info("Calling Claude API for property recommendations")
+        response = claude_client.messages.create(
+            model="claude-3-7-sonnet-20250219",
+            max_tokens=1000,
+            system="당신은 부동산 투자 전문가입니다. 사용자의 조건에 맞는 최적의 매물을 추천해주세요. 만일 딱 맞는 조건이 없다면 가장 근접한 조건으로 선택해 주세요. 참고로 자료에 나타난 단위는 모두 만원 단위야. 예를들어 150000은 15억원과 같이",
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        recommendations = response.content[0].text
+        logger.info(f"Claude API response received: {len(recommendations)} characters")
         
         return jsonify({
-            "map_html": map_html,
-            "count": len(filtered_records),
-            "statistics": {
-                "total_records": len(all_records),
-                "status_filtered": status_filtered_count,
-                "condition_filtered": condition_filtered_count,
-                "passed_filter": len(filtered_records),
-                "geocoding_failed": geocoding_failed_count,
-                "markers_added": added_markers
-            }
+            "recommendations": recommendations,
+            "total_properties": len(properties),
+            "searched_properties": total_record_count,
+            "valid_properties": valid_record_count,
+            "ai_analyzed": len(properties_for_ai)
         })
         
     except Exception as e:
-        logger.error(f"Search map error: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
+        logger.error(f"AI property search error: {str(e)}")
+        return jsonify({"error": f"Error processing request: {str(e)}"}), 500
 
 @app.route('/api/blog-feed')
 def blog_feed():
