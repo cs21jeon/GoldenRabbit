@@ -245,7 +245,7 @@ def search_map():
         airtable_key = os.environ.get("AIRTABLE_API_KEY")
         base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
         table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
-        view_id = os.environ.get("AIRTABLE_ALL_VIEW_ID", "viwyV15T4ihMpbDbr")
+        view_id = os.environ.get("AIRTABLE_VIEW_ID", "viwyV15T4ihMpbDbr")
         
         if not airtable_key:
             logger.error("AIRTABLE_API_KEY not set")
@@ -256,30 +256,52 @@ def search_map():
         }
         
         # 뷰 ID를 URL 파라미터로 추가
-        url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
-        if view_id:
-            url += f"?view={view_id}"
+        base_url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
         
-        logger.info(f"Fetching data from: {url}")
+        # 모든 레코드 가져오기 (페이지네이션 처리)
+        all_records = []
+        offset = None
+        page_count = 0
         
-        try:
-            response = requests.get(url, headers=headers)
+        while True:
+            url = base_url
+            params = {}
             
-            if response.status_code != 200:
-                logger.error(f"Airtable API error: {response.status_code}")
-                return jsonify({
-                    "error": "Airtable data fetch failed",
-                    "details": response.text
-                }), response.status_code
+            if view_id:
+                params['view'] = view_id
+            
+            if offset:
+                params['offset'] = offset
                 
-        except Exception as e:
-            logger.error(f"Request error: {str(e)}")
-            return jsonify({"error": f"Request error: {str(e)}"}), 500
+            logger.info(f"Fetching page {page_count + 1}, offset: {offset}")
+            
+            try:
+                response = requests.get(url, headers=headers, params=params)
+                
+                if response.status_code != 200:
+                    logger.error(f"Airtable API error: {response.status_code}")
+                    return jsonify({
+                        "error": "Airtable data fetch failed",
+                        "details": response.text
+                    }), response.status_code
+                    
+                data = response.json()
+                records = data.get('records', [])
+                all_records.extend(records)
+                
+                logger.info(f"Page {page_count + 1}: {len(records)} records fetched")
+                page_count += 1
+                
+                # 다음 페이지가 있는지 확인
+                offset = data.get('offset')
+                if not offset:
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Request error: {str(e)}")
+                return jsonify({"error": f"Request error: {str(e)}"}), 500
         
-        # 데이터 처리
-        airtable_data = response.json()
-        all_records = airtable_data.get('records', [])
-        logger.info(f"Total records from Airtable: {len(all_records)}")
+        logger.info(f"Total records from Airtable: {len(all_records)} (in {page_count} pages)")
         
         filtered_records = []
         status_filtered_count = 0
@@ -559,41 +581,81 @@ def property_search():
             "Authorization": f"Bearer {airtable_key}"
         }
         
-        # 뷰 ID를 URL 파라미터로 추가
-        url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
-        if view_id:
-            url += f"?view={view_id}"
+        # 모든 레코드 가져오기 (페이지네이션 처리)
+        all_records = []
+        offset = None
+        page_count = 0
         
-        # API 요청 로깅
-        logger.info(f"Requesting Airtable data from: {url}")
-
-        response = requests.get(url, headers=headers)
+        base_url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
         
-        if response.status_code != 200:
-            logger.error(f"Failed to fetch properties: {response.text}")
-            return jsonify({"error": "Failed to fetch property data"}), 500
-        
-        # 응답 로깅
-        logger.info(f"Airtable response status: {response.status_code}")
-        logger.info(f"Airtable response length: {len(response.text)} characters")
-
-        # 에어테이블 데이터 처리
-        properties_data = response.json()
+        try:
+            while True:
+                params = {}
+                
+                if view_id:
+                    params['view'] = view_id
+                
+                if offset:
+                    params['offset'] = offset
+                
+                logger.info(f"Fetching page {page_count + 1}, offset: {offset}")
+                
+                response = requests.get(base_url, headers=headers, params=params)
+                
+                if response.status_code != 200:
+                    logger.error(f"Failed to fetch properties: {response.text}")
+                    return jsonify({"error": "Failed to fetch property data"}), 500
+                
+                data = response.json()
+                records = data.get('records', [])
+                all_records.extend(records)
+                
+                logger.info(f"Page {page_count + 1}: {len(records)} records fetched")
+                page_count += 1
+                
+                # 다음 페이지가 있는지 확인
+                offset = data.get('offset')
+                if not offset:
+                    break
+                    
+        except Exception as e:
+            logger.error(f"Request error: {str(e)}")
+            return jsonify({"error": f"Request error: {str(e)}"}), 500
         
         # 레코드 수 로깅
-        record_count = len(properties_data.get('records', []))
-        logger.info(f"Received {record_count} records from Airtable")
+        total_record_count = len(all_records)
+        logger.info(f"Total records received from Airtable: {total_record_count} (in {page_count} pages)")
 
         # 첫 번째 레코드의 필드명 로깅
-        if record_count > 0:
-            first_record = properties_data['records'][0]
+        if total_record_count > 0:
+            first_record = all_records[0]
             logger.info(f"Sample record ID: {first_record.get('id')}")
             logger.info(f"Available fields: {', '.join(first_record.get('fields', {}).keys())}")
         
         properties = []
+        
+        # 현황 필드 필터링 추가
+        valid_status = ["네이버", "디스코", "당근", "비공개"]
+        valid_record_count = 0
 
-        for record in properties_data.get('records', []):
+        for record in all_records:
             fields = record.get('fields', {})
+            
+            # 현황 필드 확인
+            status = fields.get('현황')
+            is_valid_status = False
+            
+            if status:
+                if isinstance(status, list):
+                    is_valid_status = any(s in valid_status for s in status)
+                elif isinstance(status, str):
+                    is_valid_status = status in valid_status
+            
+            # 유효한 상태가 아니면 건너뛰기
+            if not is_valid_status:
+                continue
+                
+            valid_record_count += 1
             
             # 매물 정보 구조화 (필요한 필드만 추출)
             property_info = {
@@ -609,7 +671,8 @@ def property_search():
             properties.append(property_info)
         
         # 처리된 데이터 로깅
-        logger.info(f"Processed {len(properties)} properties")
+        logger.info(f"Processed {len(properties)} properties out of {total_record_count} total records")
+        logger.info(f"Valid status records: {valid_record_count}")
         
         # 첫 번째 처리된 매물 정보 로깅
         if properties:
@@ -618,14 +681,14 @@ def property_search():
             logger.warning("No properties were processed successfully")
 
         # 데이터 양이 너무 많으면 제한
+        properties_for_ai = properties[:15] if len(properties) > 15 else properties
         if len(properties) > 15:
-            logger.info(f"Limiting properties from {len(properties)} to 15")
-            properties = properties[:15]
+            logger.info(f"Limiting properties for AI from {len(properties)} to 15")
         
         # Claude에 전송할 프롬프트 구성
         prompt = f"""
-        다음은 부동산 매물 목록입니다:
-        {json.dumps(properties, ensure_ascii=False, indent=2)}
+        다음은 부동산 매물 목록입니다 (전체 {len(properties)}개 중 {len(properties_for_ai)}개):
+        {json.dumps(properties_for_ai, ensure_ascii=False, indent=2)}
         
         사용자의 검색 조건:
         - 지역: {location}
@@ -635,6 +698,7 @@ def property_search():
         
         위 조건에 가장 적합한 매물 2-3개를 추천해주세요. 각 매물에 대해 다음 형식으로 답변해주세요:
         
+        매물 1:
         위치: [주소]
         가격: [매매가]
         주용도: [주용도]
@@ -647,6 +711,8 @@ def property_search():
 
         결과 출력하는 맨 아래에는 "더 많은 매물이 궁금하시다면 아래 '상담문의'를 남겨주세요.
         빠른 시일 내에 답변드리겠습니다."라는 문구를 출력해 주세요.
+        
+        참고: 검색 가능한 전체 매물은 {len(properties)}개입니다.
         """
         
         # Claude API 호출
@@ -664,7 +730,11 @@ def property_search():
         logger.info(f"Claude API response received: {len(recommendations)} characters")
         
         return jsonify({
-            "recommendations": recommendations
+            "recommendations": recommendations,
+            "total_properties": len(properties),
+            "searched_properties": total_record_count,
+            "valid_properties": valid_record_count,
+            "ai_analyzed": len(properties_for_ai)
         })
         
     except Exception as e:
