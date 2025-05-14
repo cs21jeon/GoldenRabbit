@@ -715,13 +715,25 @@ def property_search():
             except:
                 yield_display = "정보없음"
             
+            # 실투자금 처리 - 만원 단위를 억원으로 변환
+            investment_raw = fields.get('실투자금', 0)
+            try:
+                investment_in_man = float(investment_raw) if investment_raw else 0
+                # 억원으로 변환
+                investment_in_eok = investment_in_man / 10000 if investment_in_man >= 10000 else investment_in_man / 10000
+                investment_display = f"{investment_in_eok:.1f}억원" if investment_in_man >= 10000 else f"{int(investment_in_man)}만원"
+            except:
+                investment_in_man = 0
+                investment_display = "정보없음"
+            
             # 매물 정보 구조화 (AI가 이해하기 쉽게 변환)
             property_info = {
                 "id": record.get('레코드id', ''),
                 "address": fields.get('지번 주소', ''),
                 "price": price_display,  # 이미 변환된 가격
                 "price_raw": price_in_man,  # 원본 만원 단위 값
-                "actual_investment": fields.get('실투자금', ''),
+                "actual_investment": investment_display,  # 이미 변환된 실투자금
+                "investment_raw": investment_in_man,  # 원본 만원 단위 값
                 "monthly_income": fields.get('월세(만원)', ''),
                 "yield": yield_display,  # 이미 변환된 수익률
                 "property_type": fields.get('주용도', ''),
@@ -758,27 +770,44 @@ def property_search():
         위 조건에 가장 적합한 매물 2-3개를 추천해주세요. 
         
         주의사항:
-        - 위 목록의 'price' 필드는 이미 한글로 표시된 가격입니다 (예: "25.0억원", "8000만원")
-        - 이 가격을 그대로 사용하세요. 추가 변환이 필요없습니다.
-        - 'yield' 필드도 이미 "%"가 포함되어 있습니다.
+        - 'price' 필드는 이미 한글로 표시된 가격입니다 (예: "25.0억원", "8000만원")
+        - 'actual_investment' 필드도 이미 한글로 표시된 금액입니다 (예: "10.0억원", "5000만원")
+        - 'yield' 필드도 이미 "%"가 포함되어 있습니다
+        - 모든 값을 변환 없이 그대로 사용하세요
         
-        각 매물에 대해 다음 형식으로 답변해주세요:
+        각 매물에 대해 다음 형식으로 답변해주세요. 깔끔한 형식을 위해 제목 앞에는 ##을 사용하세요:
         
-        매물 1:
+        ## 매물 1:
+        위치: [주소]
+        가격: [price 필드 값 그대로]
+        주용도: [주용도]
+        수익률: [yield 필드 값 그대로]
+        추천 이유: [이 사용자에게 왜 이 매물이 적합한지 간단히 설명] 
+        실투자금: [actual_investment 필드 값 그대로]로 매물가격 대비 주목할만한 적은 투자금입니다.
+        
+        
+        ## 매물 2:
         위치: [주소]
         가격: [price 필드 값 그대로]
         주용도: [주용도]
         수익률: [yield 필드 값 그대로]
         추천 이유: [이 사용자에게 왜 이 매물이 적합한지 간단히 설명]
+        실투자금: [actual_investment 필드 값 그대로]로 부담이 적습니다.
         
-        매물 2: ...
+        
+        ## 매물 3:
+        위치: [주소]
+        가격: [price 필드 값 그대로]
+        주용도: [주용도]
+        수익률: [yield 필드 값 그대로]
+        추천 이유: [이 사용자에게 왜 이 매물이 적합한지 간단히 설명]
+        실투자금: [actual_investment 필드 값 그대로]로 효율적인 투자가 가능합니다.
+        
         
         조건에 맞는 매물이 없으면 '조건에 맞는 매물이 없습니다'라고 답변해주세요.
 
-        결과 출력하는 맨 아래에는 "더 많은 매물이 궁금하시다면 아래 '상담문의'를 남겨주세요.
-        빠른 시일 내에 답변드리겠습니다."라는 문구를 출력해 주세요.
-        
-        참고: 검색 가능한 전체 매물은 {len(properties)}개입니다.
+        더 많은 매물이 궁금하시다면 아래 '상담문의'를 남겨주세요.
+        빠른 시일 내에 답변드리겠습니다.
         """
         
         # Claude API 호출
@@ -786,7 +815,7 @@ def property_search():
         response = claude_client.messages.create(
             model="claude-3-7-sonnet-20250219",
             max_tokens=1000,
-            system="당신은 부동산 투자 전문가입니다. 사용자의 조건에 맞는 최적의 매물을 추천해주세요. 제공된 데이터의 가격과 수익률은 이미 올바른 형식으로 변환되어 있으므로, 추가 계산이나 변환 없이 그대로 사용하세요.",
+            system="당신은 부동산 투자 전문가입니다. 사용자의 조건에 맞는 최적의 매물을 추천해주세요. 제공된 데이터의 가격, 실투자금, 수익률은 이미 올바른 형식으로 변환되어 있으므로, 추가 계산이나 변환 없이 그대로 사용하세요. 깔끔한 형식을 위해 각 매물 제목 앞에 ##을 사용하고, 각 항목 사이에 적절한 줄바꿈을 넣어주세요.",
             messages=[
                 {"role": "user", "content": prompt}
             ]
