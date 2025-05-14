@@ -230,6 +230,201 @@ def get_property_list():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/search-map', methods=['POST'])
+def search_map():
+    """검색 조건에 따른 동적 지도 생성"""
+    try:
+        import folium
+        from datetime import datetime
+        
+        # 검색 조건 받기
+        data = request.json
+        
+        # Airtable에서 데이터 가져오기
+        airtable_key = os.environ.get("AIRTABLE_API_KEY")
+        base_id = "appGSg5QfDNKgFf73"
+        table_id = "tblnR438TK52Gr0HB"
+        view_id = "viwyV15T4ihMpbDbr"
+        
+        headers = {
+            "Authorization": f"Bearer {airtable_key}"
+        }
+        
+        url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
+        if view_id:
+            url += f"?view={view_id}"
+        
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            return jsonify({"error": "Failed to fetch data"}), 500
+        
+        # 데이터 필터링
+        all_records = response.json().get('records', [])
+        filtered_records = []
+        
+        for record in all_records:
+            fields = record.get('fields', {})
+            
+            # 각 조건 확인
+            should_include = True
+            
+            # 매가 조건
+            if data.get('price_value') and data.get('price_condition') != 'all':
+                price = fields.get('매가(만원)', 0)
+                try:
+                    price = float(price) if price else 0
+                    price_val = float(data['price_value'])
+                    if data['price_condition'] == 'above' and price < price_val:
+                        should_include = False
+                    if data['price_condition'] == 'below' and price > price_val:
+                        should_include = False
+                except:
+                    should_include = False
+            
+            # 실투자금 조건
+            if data.get('investment_value') and data.get('investment_condition') != 'all':
+                investment = fields.get('실투자금', 0)
+                try:
+                    investment = float(investment) if investment else 0
+                    investment_val = float(data['investment_value'])
+                    if data['investment_condition'] == 'above' and investment < investment_val:
+                        should_include = False
+                    if data['investment_condition'] == 'below' and investment > investment_val:
+                        should_include = False
+                except:
+                    should_include = False
+            
+            # 수익률 조건
+            if data.get('yield_value') and data.get('yield_condition') != 'all':
+                yield_rate = fields.get('융자제외수익률(%)', 0)
+                try:
+                    yield_rate = float(yield_rate) if yield_rate else 0
+                    yield_val = float(data['yield_value'])
+                    if data['yield_condition'] == 'above' and yield_rate < yield_val:
+                        should_include = False
+                    if data['yield_condition'] == 'below' and yield_rate > yield_val:
+                        should_include = False
+                except:
+                    should_include = False
+            
+            # 토지면적 조건
+            if data.get('area_value') and data.get('area_condition') != 'all':
+                area = fields.get('토지면적(㎡)', 0)
+                try:
+                    area = float(area) if area else 0
+                    area_val = float(data['area_value'])
+                    if data['area_condition'] == 'above' and area < area_val:
+                        should_include = False
+                    if data['area_condition'] == 'below' and area > area_val:
+                        should_include = False
+                except:
+                    should_include = False
+            
+            # 사용승인일 조건
+            if data.get('approval_date') and data.get('approval_condition') != 'all':
+                approval = fields.get('사용승인일', '')
+                try:
+                    if approval:
+                        approval_datetime = datetime.strptime(approval, '%Y-%m-%d')
+                        target_datetime = datetime.strptime(data['approval_date'], '%Y-%m-%d')
+                        
+                        if data['approval_condition'] == 'before' and approval_datetime >= target_datetime:
+                            should_include = False
+                        if data['approval_condition'] == 'after' and approval_datetime <= target_datetime:
+                            should_include = False
+                except:
+                    should_include = False
+            
+            if should_include:
+                filtered_records.append(record)
+        
+        # 지도 생성
+        folium_map = folium.Map(location=[37.4834458778777, 126.970207234818], zoom_start=15)
+        
+        # 타일 레이어 추가
+        folium.TileLayer(
+            tiles='https://goldenrabbit.biz/api/vtile?z={z}&y={y}&x={x}',
+            attr='공간정보 오픈플랫폼(브이월드)',
+            name='브이월드 배경지도',
+        ).add_to(folium_map)
+        
+        # 마커 추가
+        for record in filtered_records:
+            fields = record.get('fields', {})
+            address = fields.get('지번 주소')
+            price = fields.get('매가(만원)')
+            record_id = record.get('id')
+            
+            if address:
+                lat, lon = get_geocode(address)
+                if lat and lon:
+                    # 가격 표시 형식
+                    if isinstance(price, (int, float)):
+                        price_display = f"{price:,}만원" if price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.')
+                    else:
+                        price_display = "가격정보 없음"
+                    
+                    # 팝업 HTML
+                    popup_html = f"""
+                    <div style="font-family: 'Noto Sans KR', sans-serif;">
+                        <div style="font-size: 16px; font-weight: bold; margin-bottom: 6px;">{address}</div>
+                        <div style="color: #444;">매가: {price_display}</div>
+                    """
+                    
+                    if fields.get('토지면적(㎡)'):
+                        try:
+                            sqm = float(fields['토지면적(㎡)'])
+                            pyeong = round(sqm / 3.3058)
+                            popup_html += f'<div style="color: #444;">대지: {pyeong}평 ({sqm}㎡)</div>'
+                        except:
+                            pass
+                    
+                    if fields.get('층수'):
+                        popup_html += f'<div style="color: #444;">층수: {fields["층수"]}</div>'
+                    
+                    if fields.get('주용도'):
+                        popup_html += f'<div style="color: #444;">용도: {fields["주용도"]}</div>'
+                    
+                    # 에어테이블 링크
+                    airtable_url = f"https://airtable.com/{base_id}/{table_id}/viwyV15T4ihMpbDbr/{record_id}?blocks=hide"
+                    popup_html += f'<a href="{airtable_url}" target="_blank" style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">상세내역보기</a>'
+                    popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">이 매물 문의하기</a>'
+                    popup_html += "</div>"
+                    
+                    # 가격 말풍선 아이콘
+                    bubble_html = f"""
+                    <div style="background-color: #fff; border: 2px solid #e38000; border-radius: 6px; 
+                               box-shadow: 0 2px 5px rgba(0,0,0,0.2); padding: 3px 6px; font-size: 13px; 
+                               font-weight: bold; color: #e38000; white-space: nowrap; text-align: center;">
+                        {price_display}
+                    </div>
+                    """
+                    
+                    icon = folium.DivIcon(
+                        html=bubble_html,
+                        icon_size=(100, 40),
+                        icon_anchor=(50, 40)
+                    )
+                    
+                    folium.Marker(
+                        location=[lat, lon],
+                        popup=folium.Popup(popup_html, max_width=250),
+                        icon=icon
+                    ).add_to(folium_map)
+        
+        # HTML 문자열로 반환
+        map_html = folium_map._repr_html_()
+        
+        return jsonify({
+            "map_html": map_html,
+            "count": len(filtered_records)
+        })
+        
+    except Exception as e:
+        logger.error(f"Search map error: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 # AI 물건 검색 기능 추가
 @app.route('/api/property-search', methods=['POST'])
 def property_search():
