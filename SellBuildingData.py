@@ -312,13 +312,19 @@ def create_map():
     
     // 마커 참조 저장
     var markers = {{}};
-    {folium_map._name}.eachLayer(function(layer) {{
-        if (layer instanceof L.Marker) {{
-            var markerName = layer._myName;
-            if (markerName && markerName.startsWith('marker_')) {{
-                var index = parseInt(markerName.split('_')[1]);
-                markers[index] = layer;
-            }}
+    
+    // Leaflet 맵이 로드된 후 실행
+    document.addEventListener('DOMContentLoaded', function() {{
+        if (typeof {folium_map._name} !== 'undefined') {{
+            {folium_map._name}.eachLayer(function(layer) {{
+                if (layer instanceof L.Marker) {{
+                    var markerName = layer._myName;
+                    if (markerName && markerName.startsWith('marker_')) {{
+                        var index = parseInt(markerName.split('_')[1]);
+                        markers[index] = layer;
+                    }}
+                }}
+            }});
         }}
     }});
     
@@ -415,26 +421,30 @@ def create_map():
     }});
     
     // 마커에 인덱스 저장
-    {folium_map._name}.eachLayer(function(layer) {{
-        if (layer instanceof L.Marker && layer.options.icon) {{
-            var iconHtml = layer.options.icon.options.html;
-            var match = iconHtml.match(/>([\d,]+)만원<|>([\d.]+)억원</);
-            if (match) {{
-                var priceText = match[1] || match[2];
-                for (var i = 0; i < allProperties.length; i++) {{
-                    var prop = allProperties[i];
-                    var propPrice = prop.price;
-                    var displayPrice = propPrice < 10000 ? 
-                        (propPrice + '').replace(/\B(?=(\d{{3}})+(?!\d))/g, ',') + '만원' :
-                        (propPrice / 10000).toFixed(1).replace(/\.0$/, '') + '억원';
-                    
-                    if (displayPrice.includes(priceText)) {{
-                        layer._myName = 'marker_' + i;
-                        markers[i] = layer;
-                        break;
+    document.addEventListener('DOMContentLoaded', function() {{
+        if (typeof {folium_map._name} !== 'undefined') {{
+            {folium_map._name}.eachLayer(function(layer) {{
+                if (layer instanceof L.Marker && layer.options.icon) {{
+                    var iconHtml = layer.options.icon.options.html;
+                    var match = iconHtml.match(/>([\d,]+)만원<|>([\d.]+)억원</);
+                    if (match) {{
+                        var priceText = match[1] || match[2];
+                        for (var i = 0; i < allProperties.length; i++) {{
+                            var prop = allProperties[i];
+                            var propPrice = prop.price;
+                            var displayPrice = propPrice < 10000 ? 
+                                (propPrice + '').replace(/\B(?=(\d{{3}})+(?!\d))/g, ',') + '만원' :
+                                (propPrice / 10000).toFixed(1).replace(/\.0$/, '') + '억원';
+                            
+                            if (displayPrice.includes(priceText)) {{
+                                layer._myName = 'marker_' + i;
+                                markers[i] = layer;
+                                break;
+                            }}
+                        }}
                     }}
                 }}
-            }}
+            }});
         }}
     }});
     </script>
