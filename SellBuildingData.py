@@ -237,17 +237,23 @@ def create_map():
         if lat is None or lon is None:
             continue
 
-        # JavaScript 데이터에 추가
+        # JavaScript 데이터에 추가 (가격 필드 수정)
+        property_price = price if price else field_values.get('매가(만원)', 0)
+        try:
+            property_price = float(property_price) if property_price else 0
+        except:
+            property_price = 0
+            
         javascript_data.append({
             'index': marker_index,
             'lat': lat,
             'lon': lon,
             'name': name,
             'address': address,
-            'price': field_values.get('매가(만원)', 0),
-            'investment': field_values.get('실투자금', 0),
-            'yield': field_values.get('융자제외수익률(%)', 0),
-            'area': field_values.get('토지면적(㎡)', 0),
+            'price': property_price,  # 수정된 부분
+            'investment': float(field_values.get('실투자금', 0)) if field_values.get('실투자금') else 0,
+            'yield': float(field_values.get('융자제외수익률(%)', 0)) if field_values.get('융자제외수익률(%)') else 0,
+            'area': float(field_values.get('토지면적(㎡)', 0)) if field_values.get('토지면적(㎡)') else 0,
             'approval_date': field_values.get('사용승인일', ''),
             'record_id': record_id,
             'layers': field_values.get('층수', ''),
@@ -329,15 +335,22 @@ def create_map():
     }});
     
     function filterProperties(conditions) {{
+        console.log('filterProperties 호출됨', conditions);
         var filteredProperties = [];
+        var totalCount = allProperties.length;
+        var filteredCount = 0;
         
         allProperties.forEach(function(property, index) {{
             var shouldShow = true;
+            
+            // 디버깅용 로그
+            console.log('Property ' + index + ':', property);
             
             // 매가 조건
             if (conditions.price_value && conditions.price_condition !== 'all') {{
                 var price = parseFloat(property.price) || 0;
                 var priceVal = parseFloat(conditions.price_value);
+                console.log('가격 비교: ' + price + ' vs ' + priceVal + ' (조건: ' + conditions.price_condition + ')');
                 if (conditions.price_condition === 'above' && price < priceVal) shouldShow = false;
                 if (conditions.price_condition === 'below' && price > priceVal) shouldShow = false;
             }}
@@ -379,6 +392,7 @@ def create_map():
             
             if (shouldShow) {{
                 filteredProperties.push(property);
+                filteredCount++;
             }}
             
             // 마커 표시/숨김
@@ -392,6 +406,7 @@ def create_map():
             }}
         }});
         
+        console.log('필터링 결과: ' + filteredCount + '/' + totalCount);
         return filteredProperties;
     }}
     
