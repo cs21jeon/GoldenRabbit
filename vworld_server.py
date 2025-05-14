@@ -239,32 +239,67 @@ def search_map():
         
         # 검색 조건 받기
         data = request.json
+        logger.info(f"Search conditions: {data}")
         
-        # Airtable에서 데이터 가져오기
+        # Airtable에서 데이터 가져오기 (환경 변수에서 읽기)
         airtable_key = os.environ.get("AIRTABLE_API_KEY")
-        base_id = "appGSg5QfDNKgFf73"
-        table_id = "tblnR438TK52Gr0HB"
-        view_id = "viwyV15T4ihMpbDbr"
+        base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
+        table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
+        view_id = os.environ.get("AIRTABLE_VIEW_ID", "viwyV15T4ihMpbDbr")
         
+        if not airtable_key:
+            logger.error("AIRTABLE_API_KEY not set")
+            return jsonify({"error": "Airtable API key not set"}), 500
+            
         headers = {
             "Authorization": f"Bearer {airtable_key}"
         }
         
+        # 뷰 ID를 URL 파라미터로 추가
         url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
         if view_id:
             url += f"?view={view_id}"
         
-        response = requests.get(url, headers=headers)
+        logger.info(f"Fetching data from: {url}")
         
-        if response.status_code != 200:
-            return jsonify({"error": "Failed to fetch data"}), 500
+        try:
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code != 200:
+                logger.error(f"Airtable API error: {response.status_code}")
+                return jsonify({
+                    "error": "Airtable data fetch failed",
+                    "details": response.text
+                }), response.status_code
+                
+        except Exception as e:
+            logger.error(f"Request error: {str(e)}")
+            return jsonify({"error": f"Request error: {str(e)}"}), 500
         
-        # 데이터 필터링
-        all_records = response.json().get('records', [])
+        # 데이터 처리
+        airtable_data = response.json()
+        all_records = airtable_data.get('records', [])
+        logger.info(f"Total records: {len(all_records)}")
+        
         filtered_records = []
         
         for record in all_records:
             fields = record.get('fields', {})
+            
+            # 현황 필드 확인
+            status = fields.get('현황')
+            valid_status = ["네이버", "디스코", "당근", "비공개"]
+            is_valid_status = False
+            
+            if status:
+                if isinstance(status, list):
+                    is_valid_status = any(s in valid_status for s in status)
+                elif isinstance(status, str):
+                    is_valid_status = status in valid_status
+            
+            # 유효한 상태가 아니면 건너뛰기
+            if not is_valid_status:
+                continue
             
             # 각 조건 확인
             should_include = True
@@ -277,9 +312,10 @@ def search_map():
                     price_val = float(data['price_value'])
                     if data['price_condition'] == 'above' and price < price_val:
                         should_include = False
-                    if data['price_condition'] == 'below' and price > price_val:
+                    elif data['price_condition'] == 'below' and price > price_val:
                         should_include = False
-                except:
+                except Exception as e:
+                    logger.warning(f"Price parsing error: {e}")
                     should_include = False
             
             # 실투자금 조건
@@ -290,7 +326,7 @@ def search_map():
                     investment_val = float(data['investment_value'])
                     if data['investment_condition'] == 'above' and investment < investment_val:
                         should_include = False
-                    if data['investment_condition'] == 'below' and investment > investment_val:
+                    elif data['investment_condition'] == 'below' and investment > investment_val:
                         should_include = False
                 except:
                     should_include = False
@@ -303,7 +339,7 @@ def search_map():
                     yield_val = float(data['yield_value'])
                     if data['yield_condition'] == 'above' and yield_rate < yield_val:
                         should_include = False
-                    if data['yield_condition'] == 'below' and yield_rate > yield_val:
+                    elif data['yield_condition'] == 'below' and yield_rate > yield_val:
                         should_include = False
                 except:
                     should_include = False
@@ -316,7 +352,7 @@ def search_map():
                     area_val = float(data['area_value'])
                     if data['area_condition'] == 'above' and area < area_val:
                         should_include = False
-                    if data['area_condition'] == 'below' and area > area_val:
+                    elif data['area_condition'] == 'below' and area > area_val:
                         should_include = False
                 except:
                     should_include = False
@@ -331,13 +367,16 @@ def search_map():
                         
                         if data['approval_condition'] == 'before' and approval_datetime >= target_datetime:
                             should_include = False
-                        if data['approval_condition'] == 'after' and approval_datetime <= target_datetime:
+                        elif data['approval_condition'] == 'after' and approval_datetime <= target_datetime:
                             should_include = False
-                except:
+                except Exception as e:
+                    logger.warning(f"Date parsing error: {e}")
                     should_include = False
             
             if should_include:
                 filtered_records.append(record)
+        
+        logger.info(f"Filtered records: {len(filtered_records)}")
         
         # 지도 생성
         folium_map = folium.Map(location=[37.4834458778777, 126.970207234818], zoom_start=15)
@@ -350,68 +389,89 @@ def search_map():
         ).add_to(folium_map)
         
         # 마커 추가
+        added_markers = 0
         for record in filtered_records:
             fields = record.get('fields', {})
             address = fields.get('지번 주소')
             price = fields.get('매가(만원)')
             record_id = record.get('id')
             
-            if address:
-                lat, lon = get_geocode(address)
-                if lat and lon:
-                    # 가격 표시 형식
-                    if isinstance(price, (int, float)):
-                        price_display = f"{price:,}만원" if price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.')
-                    else:
-                        price_display = "가격정보 없음"
-                    
-                    # 팝업 HTML
-                    popup_html = f"""
-                    <div style="font-family: 'Noto Sans KR', sans-serif;">
-                        <div style="font-size: 16px; font-weight: bold; margin-bottom: 6px;">{address}</div>
-                        <div style="color: #444;">매가: {price_display}</div>
-                    """
-                    
-                    if fields.get('토지면적(㎡)'):
-                        try:
-                            sqm = float(fields['토지면적(㎡)'])
-                            pyeong = round(sqm / 3.3058)
-                            popup_html += f'<div style="color: #444;">대지: {pyeong}평 ({sqm}㎡)</div>'
-                        except:
-                            pass
-                    
-                    if fields.get('층수'):
-                        popup_html += f'<div style="color: #444;">층수: {fields["층수"]}</div>'
-                    
-                    if fields.get('주용도'):
-                        popup_html += f'<div style="color: #444;">용도: {fields["주용도"]}</div>'
-                    
-                    # 에어테이블 링크
-                    airtable_url = f"https://airtable.com/{base_id}/{table_id}/viwyV15T4ihMpbDbr/{record_id}?blocks=hide"
-                    popup_html += f'<a href="{airtable_url}" target="_blank" style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">상세내역보기</a>'
-                    popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">이 매물 문의하기</a>'
-                    popup_html += "</div>"
-                    
-                    # 가격 말풍선 아이콘
-                    bubble_html = f"""
-                    <div style="background-color: #fff; border: 2px solid #e38000; border-radius: 6px; 
-                               box-shadow: 0 2px 5px rgba(0,0,0,0.2); padding: 3px 6px; font-size: 13px; 
-                               font-weight: bold; color: #e38000; white-space: nowrap; text-align: center;">
-                        {price_display}
-                    </div>
-                    """
-                    
-                    icon = folium.DivIcon(
-                        html=bubble_html,
-                        icon_size=(100, 40),
-                        icon_anchor=(50, 40)
-                    )
-                    
-                    folium.Marker(
-                        location=[lat, lon],
-                        popup=folium.Popup(popup_html, max_width=250),
-                        icon=icon
-                    ).add_to(folium_map)
+            if not address:
+                continue
+                
+            # 주소 지오코딩
+            try:
+                geo_data, _ = get_geocode(address)
+                if geo_data.get("response", {}).get("status") == "OK":
+                    result = geo_data["response"]["result"]
+                    lat = float(result["point"]["y"])
+                    lon = float(result["point"]["x"])
+                else:
+                    continue
+            except Exception as e:
+                logger.warning(f"Geocoding error for {address}: {e}")
+                continue
+            
+            # 가격 표시 형식
+            try:
+                if isinstance(price, (int, float)):
+                    price_display = f"{int(price):,}만원" if price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.')
+                else:
+                    price_display = "가격정보 없음"
+            except:
+                price_display = "가격정보 없음"
+            
+            # 팝업 HTML
+            popup_html = f"""
+            <div style="font-family: 'Noto Sans KR', sans-serif;">
+                <div style="font-size: 16px; font-weight: bold; margin-bottom: 6px;">{address}</div>
+                <div style="color: #444;">매가: {price_display}</div>
+            """
+            
+            if fields.get('토지면적(㎡)'):
+                try:
+                    sqm = float(fields['토지면적(㎡)'])
+                    pyeong = round(sqm / 3.3058)
+                    popup_html += f'<div style="color: #444;">대지: {pyeong}평 ({sqm}㎡)</div>'
+                except:
+                    pass
+            
+            if fields.get('층수'):
+                popup_html += f'<div style="color: #444;">층수: {fields["층수"]}</div>'
+            
+            if fields.get('주용도'):
+                popup_html += f'<div style="color: #444;">용도: {fields["주용도"]}</div>'
+            
+            # 에어테이블 링크
+            airtable_url = f"https://airtable.com/{base_id}/{table_id}/viwyV15T4ihMpbDbr/{record_id}?blocks=hide"
+            popup_html += f'<a href="{airtable_url}" target="_blank" style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">상세내역보기</a>'
+            popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">이 매물 문의하기</a>'
+            popup_html += "</div>"
+            
+            # 가격 말풍선 아이콘
+            bubble_html = f"""
+            <div style="background-color: #fff; border: 2px solid #e38000; border-radius: 6px; 
+                       box-shadow: 0 2px 5px rgba(0,0,0,0.2); padding: 3px 6px; font-size: 13px; 
+                       font-weight: bold; color: #e38000; white-space: nowrap; text-align: center;">
+                {price_display}
+            </div>
+            """
+            
+            icon = folium.DivIcon(
+                html=bubble_html,
+                icon_size=(100, 40),
+                icon_anchor=(50, 40)
+            )
+            
+            folium.Marker(
+                location=[lat, lon],
+                popup=folium.Popup(popup_html, max_width=250),
+                icon=icon
+            ).add_to(folium_map)
+            
+            added_markers += 1
+        
+        logger.info(f"Added {added_markers} markers to the map")
         
         # HTML 문자열로 반환
         map_html = folium_map._repr_html_()
@@ -423,7 +483,9 @@ def search_map():
         
     except Exception as e:
         logger.error(f"Search map error: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
 
 # AI 물건 검색 기능 추가
 @app.route('/api/property-search', methods=['POST'])
