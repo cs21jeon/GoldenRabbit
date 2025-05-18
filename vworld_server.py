@@ -875,12 +875,15 @@ def blog_feed():
         # 로컬 이미지 파일 존재 여부 확인
         local_image_path = f'/home/sftpuser/www/blog_thumbs/{log_no}.jpg'
         has_thumbnail = os.path.exists(local_image_path)
-
+        
+        # HTML 태그에서 이미지 제거 및 텍스트 추출
+        clean_summary = clean_html_content(entry.summary)
+        
         posts.append({
             "id": log_no,
             "title": entry.title,
             "link": entry.link,
-            "summary": entry.summary,
+            "summary": clean_summary,  # 이미지 태그가 제거된 요약 사용
             "published": entry.published,
             "has_thumbnail": has_thumbnail  # 썸네일 존재 여부 추가
         })
@@ -888,6 +891,30 @@ def blog_feed():
     blog_cache["timestamp"] = now
     blog_cache["posts"] = posts
     return jsonify(posts)
+
+# HTML 콘텐츠에서 이미지 태그를 제거하고 텍스트만 추출하는 함수
+def clean_html_content(html_content):
+    # BeautifulSoup을 사용하여 HTML 파싱
+    soup = BeautifulSoup(html_content, 'html.parser')
+    
+    # 모든 img 태그 제거
+    for img in soup.find_all('img'):
+        img.decompose()
+    
+    # HTML에서 텍스트만 추출 (태그 제거)
+    text = soup.get_text(strip=True)
+    
+    # 텍스트 길이 제한 (150자)
+    if len(text) > 150:
+        text = text[:147] + '...'
+    
+    return text
+
+# 이미지 URL 추출 함수 (나중에 이미지 다운로드에 사용할 수 있음)
+def extract_image(html_content):
+    soup = BeautifulSoup(html_content, 'html.parser')
+    img_tag = soup.find('img')
+    return img_tag['src'] if img_tag and 'src' in img_tag.attrs else None
 
 @app.route('/health')
 def health_check():
