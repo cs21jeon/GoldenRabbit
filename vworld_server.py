@@ -176,6 +176,7 @@ def submit_inquiry():
         logger.error("AIRTABLE_INQUIRY_KEY not set")
         return jsonify({"error": "Inquiry API key not set"}), 500
 
+    # 필드명이 실제 Airtable 필드명과 일치하는지 확인
     payload = {
         "records": [
             {
@@ -197,23 +198,25 @@ def submit_inquiry():
     url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
     try:
         # 디버깅 로그 추가
-        print(f"Sending to Airtable: {url}")
-        print(f"Payload: {payload}")
+        logger.info(f"Sending to Airtable: {url}")
+        logger.info(f"Payload: {payload}")
         
         response = requests.post(url, json=payload, headers=headers)
 
         # 응답 디버깅
-        print(f"Airtable response status: {response.status_code}")
-        print(f"Airtable response: {response.text}")
+        logger.info(f"Airtable response status: {response.status_code}")
+        logger.info(f"Airtable response: {response.text}")
         
         if response.status_code in [200, 201]:
             return jsonify({"status": "success"}), 200
         else:
+            logger.error(f"Airtable error: {response.text}")
             return jsonify({
                 "error": "Airtable submission failed",
                 "details": response.text
             }), response.status_code
     except Exception as e:
+        logger.error(f"Exception in submit_inquiry: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/property-list', methods=['GET'])
