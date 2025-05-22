@@ -12,6 +12,18 @@ import feedparser  # 네이버 블로그 RSS를 파싱하기 위해 필요
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, parse_qs
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+
+# 이메일 설정 - 환경 변수에서 읽기
+SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+EMAIL_ADDRESS = os.environ.get("cs21.jeon@gmail.com")  # 발송용 이메일 주소
+EMAIL_PASSWORD = os.environ.get("exhk bayn nlps gghn")  # 앱 비밀번호
+ADMIN_EMAIL = "cs21.jeon@gmail.com"  # 관리자 이메일
 
 # 환경 변수 로드
 load_dotenv()
@@ -208,6 +220,17 @@ def submit_inquiry():
         logger.info(f"Airtable response: {response.text}")
         
         if response.status_code in [200, 201]:
+            # Airtable 저장 성공 시 이메일 발송 시도
+            try:
+                email_sent = send_consultation_email(data)
+                if email_sent:
+                    logger.info("상담 문의 이메일 발송 완료")
+                else:
+                    logger.warning("상담 문의 이메일 발송 실패")
+            except Exception as email_error:
+                logger.error(f"이메일 발송 중 오류: {str(email_error)}")
+                # 이메일 발송 실패해도 상담 접수는 성공으로 처리
+            
             return jsonify({"status": "success"}), 200
         else:
             logger.error(f"Airtable error: {response.text}")
@@ -854,6 +877,294 @@ def property_search():
     except Exception as e:
         logger.error(f"AI property search error: {str(e)}")
         return jsonify({"error": f"Error processing request: {str(e)}"}), 500
+
+def send_consultation_email(customer_data):
+    """
+    상담 문의 접수 시 이메일 발송 함수
+    customer_data: dict - 고객이 입력한 상담 데이터
+    """
+    try:
+        # 이메일 설정 확인
+        if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
+            logger.error("이메일 설정이 완료되지 않았습니다. EMAIL_ADDRESS, EMAIL_PASSWORD 환경변수를 확인하세요.")
+            return False
+        
+        customer_email = customer_data.get('email', '').strip()
+        customer_phone = customer_data.get('phone', '')
+        property_type = customer_data.get('propertyType', '')
+        message = customer_data.get('message', '')
+        
+        # 매물 종류 매핑
+        property_type_map = {
+            'house': '단독/다가구',
+            'mixed': '상가주택', 
+            'commercial': '상업용빌딩',
+            'land': '재건축/토지',
+            'sell': '매물접수'
+        }
+        property_type_korean = property_type_map.get(property_type, property_type)
+        
+        # 고객 이름 추출 (이메일이 있는 경우)
+        customer_name = ""
+        if customer_email:
+            customer_name = customer_email.split('@')[0]
+        else:
+            customer_name = "고객"
+        
+        # HTML 이메일 템플릿
+        html_template = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>금토끼부동산 문의 접수 안내</title>
+    <style>
+        body {{
+            font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', '맑은 고딕', sans-serif;
+            line-height: 1.6;
+            color: #333333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }}
+        .email-container {{
+            border: 1px solid #dddddd;
+            border-radius: 8px;
+            padding: 25px;
+            background-color: #ffffff;
+        }}
+        .header {{
+            text-align: center;
+            margin-bottom: 25px;
+        }}
+        .header img {{
+            max-width: 150px;
+            height: auto;
+        }}
+        .greeting {{
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }}
+        .content {{
+            margin-bottom: 25px;
+        }}
+        .inquiry-details {{
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }}
+        .detail-row {{
+            margin-bottom: 10px;
+        }}
+        .detail-label {{
+            font-weight: bold;
+            color: #555;
+        }}
+        .button-container {{
+            text-align: center;
+            margin: 30px 0;
+        }}
+        .button {{
+            display: inline-block;
+            background-color: #FFC000;
+            color: #000000;
+            text-decoration: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 16px;
+        }}
+        .footer {{
+            text-align: center;
+            font-size: 12px;
+            color: #777777;
+            margin-top: 30px;
+            border-top: 1px solid #eeeeee;
+            padding-top: 20px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h2>금토끼부동산</h2>
+        </div>
+        
+        <div class="greeting">
+            안녕하세요. {customer_name}님
+        </div>
+        
+        <div class="content">
+            <p>금토끼부동산입니다.</p>
+            <p>저희 부동산 페이지를 방문해주셔서 감사합니다.</p>
+            <p>문의주신 내용 잘 접수되었습니다.</p>
+            <p>보내주신 문의사항 확인하여 24시간 이내 답변드리겠습니다.</p>
+            <p>감사합니다.</p>
+        </div>
+        
+        <div class="inquiry-details">
+            <h3>접수된 문의 내용</h3>
+            <div class="detail-row">
+                <span class="detail-label">매물종류:</span> {property_type_korean}
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">연락처:</span> {customer_phone}
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">문의사항:</span><br>
+                {message.replace(chr(10), '<br>')}
+            </div>
+        </div>
+        
+        <div class="button-container">
+            <a href="https://www.disco.re/hvzt1qow?share" class="button">금토끼부동산 보유 매물 전체 보기(디스코)</a>
+        </div>
+        
+        <div class="footer">
+            <p>본 메일은 자동발송되었습니다. 추가 문의사항은 회신해주시기 바랍니다.</p>
+            <p>© 2025 금토끼부동산. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
+        """
+        
+        # 관리자용 이메일 템플릿
+        admin_html_template = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>[금토끼부동산] 새로운 상담 문의 접수</title>
+    <style>
+        body {{
+            font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', '맑은 고딕', sans-serif;
+            line-height: 1.6;
+            color: #333333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }}
+        .email-container {{
+            border: 1px solid #dddddd;
+            border-radius: 8px;
+            padding: 25px;
+            background-color: #ffffff;
+        }}
+        .header {{
+            background-color: #e38000;
+            color: white;
+            padding: 15px;
+            text-align: center;
+            border-radius: 8px 8px 0 0;
+            margin: -25px -25px 20px -25px;
+        }}
+        .inquiry-details {{
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }}
+        .detail-row {{
+            margin-bottom: 15px;
+            padding: 8px 0;
+            border-bottom: 1px solid #eeeeee;
+        }}
+        .detail-label {{
+            font-weight: bold;
+            color: #555;
+            display: inline-block;
+            min-width: 80px;
+        }}
+        .urgent {{
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h2>금토끼부동산 새로운 상담 문의</h2>
+        </div>
+        
+        <div class="urgent">
+            <strong>⚠️ 새로운 상담 문의가 접수되었습니다!</strong><br>
+            빠른 시일 내에 고객에게 연락을 드려 주세요.
+        </div>
+        
+        <div class="inquiry-details">
+            <h3>📋 문의 상세 정보</h3>
+            <div class="detail-row">
+                <span class="detail-label">매물종류:</span> {property_type_korean}
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">연락처:</span> {customer_phone}
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">이메일:</span> {customer_email if customer_email else '제공되지 않음'}
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">문의사항:</span><br>
+                <div style="margin-top: 8px; padding: 10px; background-color: white; border-radius: 4px;">
+                    {message.replace(chr(10), '<br>')}
+                </div>
+            </div>
+        </div>
+        
+        <div style="text-align: center; margin-top: 30px;">
+            <p><strong>📞 고객 연락처: {customer_phone}</strong></p>
+            <p style="font-size: 14px; color: #666;">
+                접수 시간: {datetime.now().strftime('%Y년 %m월 %d일 %H시 %M분')}
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+        """
+        
+        # SMTP 서버 연결 및 이메일 발송
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        
+        # 1. 고객에게 접수 확인 이메일 발송 (이메일이 있는 경우에만)
+        if customer_email:
+            customer_msg = MIMEMultipart('alternative')
+            customer_msg['From'] = EMAIL_ADDRESS
+            customer_msg['To'] = customer_email
+            customer_msg['Subject'] = "금토끼 부동산에 상담문의가 접수되었습니다."
+            
+            customer_html_part = MIMEText(html_template, 'html', 'utf-8')
+            customer_msg.attach(customer_html_part)
+            
+            server.send_message(customer_msg)
+            logger.info(f"고객 확인 이메일 발송 완료: {customer_email}")
+        
+        # 2. 관리자에게 새 문의 알림 이메일 발송
+        admin_msg = MIMEMultipart('alternative')
+        admin_msg['From'] = EMAIL_ADDRESS
+        admin_msg['To'] = ADMIN_EMAIL
+        admin_msg['Subject'] = f"[금토끼부동산] 새로운 {property_type_korean} 상담 문의 - {customer_phone}"
+        
+        admin_html_part = MIMEText(admin_html_template, 'html', 'utf-8')
+        admin_msg.attach(admin_html_part)
+        
+        server.send_message(admin_msg)
+        logger.info(f"관리자 알림 이메일 발송 완료: {ADMIN_EMAIL}")
+        
+        server.quit()
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"이메일 발송 실패: {str(e)}")
+        return False
 
 @app.route('/api/blog-feed')
 def blog_feed():
