@@ -162,22 +162,27 @@ def vworld_wms():
         logger.error(f"WMS proxy error: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+# Flask 앱의 submit-inquiry 엔드포인트에서 매물종류 매핑 수정
 @app.route('/api/submit-inquiry', methods=['POST'])
 def submit_inquiry():
     data = request.json
     logger.info(f"Received inquiry submission: {data}")
 
-    # 매물 종류 매핑 - 에어테이블에 실제 존재하는 옵션으로 변환
+    # 매물 종류 매핑 - 에어테이블에 실제 존재하는 옵션으로 변환 (수정됨)
     property_type_map = {
         'house': '단독/다가구',
         'mixed': '상가주택', 
-        'commercial': '상업용빌딩',
+        'commercial': '상업용건물',  # '상업용빌딩'에서 '상업용건물'로 수정
         'land': '재건축/토지',
         'sell': '매물접수'
     }
 
     # 받은 propertyType을 에어테이블에 있는 값으로 매핑
     property_type = property_type_map.get(data.get("propertyType"), "기타")
+    
+    # 디버깅 로그 추가
+    logger.info(f"Original propertyType: {data.get('propertyType')}")
+    logger.info(f"Mapped propertyType: {property_type}")
     
     # 구분된 Airtable API 설정
     airtable_inquiry_key = os.environ.get("AIRTABLE_INQUIRY_KEY")
