@@ -21,8 +21,8 @@ from email import encoders
 # 이메일 설정 - 환경 변수에서 읽기
 SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-EMAIL_ADDRESS = os.environ.get("cs21.jeon@gmail.com")  # 발송용 이메일 주소
-EMAIL_PASSWORD = os.environ.get("exhk bayn nlps gghn")  # 앱 비밀번호
+EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS")  # 발송용 이메일 주소
+EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")  # 앱 비밀번호
 ADMIN_EMAIL = "cs21.jeon@gmail.com"  # 관리자 이메일
 
 # 환경 변수 로드
