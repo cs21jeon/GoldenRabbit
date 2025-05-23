@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from flask_cors import CORS
 import logging
+import traceback
 from functools import lru_cache
 import anthropic  # Claude API를 위한 패키지 추가
 import feedparser  # 네이버 블로그 RSS를 파싱하기 위해 필요
@@ -169,8 +170,10 @@ def vworld_wms():
 # Flask 앱의 submit-inquiry 엔드포인트에서 매물종류 매핑 수정
 @app.route('/api/submit-inquiry', methods=['POST'])
 def submit_inquiry():
+    logger.info("=== 상담 문의 접수 시작 ===")
+    
     data = request.json
-    logger.info(f"Received inquiry submission: {data}")
+    logger.info(f"받은 데이터: {data}")
 
     # 매물 종류 매핑 - 에어테이블에 실제 존재하는 옵션으로 변환 (수정됨)
     property_type_map = {
@@ -233,22 +236,23 @@ def submit_inquiry():
             try:
                 email_sent = send_consultation_email(data)
                 if email_sent:
-                    logger.info("상담 문의 이메일 발송 완료")
+                    logger.info("✅ 상담 문의 이메일 발송 완료")
                 else:
-                    logger.warning("상담 문의 이메일 발송 실패")
+                    logger.warning("⚠️ 상담 문의 이메일 발송 실패")
             except Exception as email_error:
-                logger.error(f"이메일 발송 중 오류: {str(email_error)}")
-                # 이메일 발송 실패해도 상담 접수는 성공으로 처리
+                logger.error(f"❌ 이메일 발송 중 오류: {str(email_error)}")
+                logger.error(f"오류 상세: {traceback.format_exc()}")
             
             return jsonify({"status": "success"}), 200
         else:
-            logger.error(f"Airtable error: {response.text}")
+            logger.error(f"Airtable 저장 실패: {response.text}")
             return jsonify({
                 "error": "Airtable submission failed",
                 "details": response.text
             }), response.status_code
+            
     except Exception as e:
-        logger.error(f"Exception in submit_inquiry: {str(e)}")
+        logger.error(f"상담 접수 전체 오류: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/property-list', methods=['GET'])
@@ -892,16 +896,40 @@ def send_consultation_email(customer_data):
     상담 문의 접수 시 이메일 발송 함수
     customer_data: dict - 고객이 입력한 상담 데이터
     """
+    logger.info("=== 이메일 발송 함수 시작 ===")
+    logger.info(f"고객 데이터: {customer_data}")
+
     try:
+        # 환경 변수 확인
+        EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS")
+        EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")
+        SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
+        SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+        ADMIN_EMAIL = "cs21.jeon@gmail.com"
+        
+        logger.info(f"EMAIL_ADDRESS: {EMAIL_ADDRESS}")
+        logger.info(f"EMAIL_PASSWORD: {'설정됨' if EMAIL_PASSWORD else '설정되지 않음'}")
+        logger.info(f"SMTP_SERVER: {SMTP_SERVER}")
+        logger.info(f"SMTP_PORT: {SMTP_PORT}")
+        logger.info(f"ADMIN_EMAIL: {ADMIN_EMAIL}")
+
         # 이메일 설정 확인
         if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
-            logger.error("이메일 설정이 완료되지 않았습니다. EMAIL_ADDRESS, EMAIL_PASSWORD 환경변수를 확인하세요.")
+            logger.error("이메일 설정이 완료되지 않았습니다.")
+            logger.error(f"EMAIL_ADDRESS 존재: {bool(EMAIL_ADDRESS)}")
+            logger.error(f"EMAIL_PASSWORD 존재: {bool(EMAIL_PASSWORD)}")
             return False
         
         customer_email = customer_data.get('email', '').strip()
         customer_phone = customer_data.get('phone', '')
         property_type = customer_data.get('propertyType', '')
         message = customer_data.get('message', '')
+        
+        logger.info(f"처리할 데이터:")
+        logger.info(f"  - 고객 이메일: {customer_email}")
+        logger.info(f"  - 고객 전화: {customer_phone}")
+        logger.info(f"  - 매물 타입: {property_type}")
+        logger.info(f"  - 메시지: {message[:50]}..." if len(message) > 50 else f"  - 메시지: {message}")
         
         # 매물 종류 매핑
         property_type_map = {
@@ -919,6 +947,9 @@ def send_consultation_email(customer_data):
             customer_name = customer_email.split('@')[0]
         else:
             customer_name = "고객"
+
+        logger.info(f"고객 이름: {customer_name}")
+        logger.info(f"매물 종류 (한글): {property_type_korean}")
         
         # HTML 이메일 템플릿
         html_template = f"""
@@ -1137,71 +1168,116 @@ def send_consultation_email(customer_data):
 </html>
         """
         
-        # SMTP 서버 연결 및 이메일 발송
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        # SMTP 연결 테스트
+        logger.info("=== SMTP 서버 연결 시도 ===")
+        try:
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            logger.info("SMTP 서버 연결 성공")
+            
+            server.starttls()
+            logger.info("TLS 연결 성공")
+            
+            server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            logger.info("SMTP 로그인 성공")
+            
+        except smtplib.SMTPAuthenticationError as auth_error:
+            logger.error(f"SMTP 인증 실패: {auth_error}")
+            logger.error("Gmail 앱 비밀번호가 올바르지 않거나 2단계 인증이 설정되지 않았을 수 있습니다.")
+            return False
+        except smtplib.SMTPConnectError as conn_error:
+            logger.error(f"SMTP 연결 실패: {conn_error}")
+            return False
+        except Exception as smtp_error:
+            logger.error(f"SMTP 오류: {smtp_error}")
+            return False
         
-        # 1. 고객에게 접수 확인 이메일 발송 (이메일이 있는 경우에만)
+        # 이메일 발송 시도
+        emails_sent = 0
+        
+        # 1. 고객에게 확인 이메일 발송 (이메일이 있는 경우에만)
         if customer_email:
-            customer_msg = MIMEMultipart('alternative')
-            customer_msg['From'] = EMAIL_ADDRESS
-            customer_msg['To'] = customer_email
-            customer_msg['Subject'] = "금토끼 부동산에 상담문의가 접수되었습니다."
+            logger.info(f"=== 고객 확인 이메일 발송 시도: {customer_email} ===")
+            try:
+                # 간단한 HTML 템플릿 (테스트용)
+                simple_html = f"""
+                <html>
+                <body>
+                    <h2>금토끼부동산</h2>
+                    <p>안녕하세요. {customer_name}님</p>
+                    <p>상담 문의가 정상적으로 접수되었습니다.</p>
+                    <p>24시간 이내에 연락드리겠습니다.</p>
+                    <hr>
+                    <p><strong>접수 내용:</strong></p>
+                    <p>매물종류: {property_type_korean}</p>
+                    <p>연락처: {customer_phone}</p>
+                    <p>문의사항: {message}</p>
+                </body>
+                </html>
+                """
+                
+                customer_msg = MIMEMultipart('alternative')
+                customer_msg['From'] = EMAIL_ADDRESS
+                customer_msg['To'] = customer_email
+                customer_msg['Subject'] = "금토끼 부동산에 상담문의가 접수되었습니다."
+                
+                customer_html_part = MIMEText(simple_html, 'html', 'utf-8')
+                customer_msg.attach(customer_html_part)
+                
+                server.send_message(customer_msg)
+                logger.info(f"고객 확인 이메일 발송 완료: {customer_email}")
+                emails_sent += 1
+                
+            except Exception as customer_email_error:
+                logger.error(f"고객 이메일 발송 실패: {customer_email_error}")
+        
+        # 2. 관리자에게 알림 이메일 발송
+        logger.info(f"=== 관리자 알림 이메일 발송 시도: {ADMIN_EMAIL} ===")
+        try:
+            # 간단한 관리자용 HTML 템플릿
+            admin_html = f"""
+            <html>
+            <body>
+                <h2>🔔 금토끼부동산 새로운 상담 문의</h2>
+                <p><strong>새로운 상담 문의가 접수되었습니다!</strong></p>
+                <hr>
+                <p><strong>📋 문의 정보:</strong></p>
+                <p>매물종류: {property_type_korean}</p>
+                <p>연락처: {customer_phone}</p>
+                <p>이메일: {customer_email if customer_email else '제공되지 않음'}</p>
+                <p>문의사항: {message}</p>
+                <hr>
+                <p>접수 시간: {datetime.now().strftime('%Y년 %m월 %d일 %H시 %M분')}</p>
+            </body>
+            </html>
+            """
             
-            customer_html_part = MIMEText(html_template, 'html', 'utf-8')
-            customer_msg.attach(customer_html_part)
+            admin_msg = MIMEMultipart('alternative')
+            admin_msg['From'] = EMAIL_ADDRESS
+            admin_msg['To'] = ADMIN_EMAIL
+            admin_msg['Subject'] = f"[금토끼부동산] 새로운 {property_type_korean} 상담 문의 - {customer_phone}"
             
-            server.send_message(customer_msg)
-            logger.info(f"고객 확인 이메일 발송 완료: {customer_email}")
-        
-        # 2. 관리자에게 새 문의 알림 이메일 발송
-        admin_msg = MIMEMultipart('alternative')
-        admin_msg['From'] = EMAIL_ADDRESS
-        admin_msg['To'] = ADMIN_EMAIL
-        admin_msg['Subject'] = f"[금토끼부동산] 새로운 {property_type_korean} 상담 문의 - {customer_phone}"
-        
-        admin_html_part = MIMEText(admin_html_template, 'html', 'utf-8')
-        admin_msg.attach(admin_html_part)
-        
-        server.send_message(admin_msg)
-        logger.info(f"관리자 알림 이메일 발송 완료: {ADMIN_EMAIL}")
+            admin_html_part = MIMEText(admin_html, 'html', 'utf-8')
+            admin_msg.attach(admin_html_part)
+            
+            server.send_message(admin_msg)
+            logger.info(f"관리자 알림 이메일 발송 완료: {ADMIN_EMAIL}")
+            emails_sent += 1
+            
+        except Exception as admin_email_error:
+            logger.error(f"관리자 이메일 발송 실패: {admin_email_error}")
         
         server.quit()
+        logger.info("SMTP 연결 종료")
         
-        return True
+        logger.info(f"=== 이메일 발송 완료: 총 {emails_sent}개 발송 ===")
+        return emails_sent > 0
         
     except Exception as e:
-        logger.error(f"이메일 발송 실패: {str(e)}")
+        logger.error(f"이메일 발송 함수 전체 오류: {str(e)}")
+        logger.error(f"오류 타입: {type(e).__name__}")
+        import traceback
+        logger.error(f"오류 상세: {traceback.format_exc()}")
         return False
-
-@app.route('/version.json')
-def version_info():
-    """웹 앱 버전 정보 제공 - 파일에서 동적 로드"""
-    try:
-        # 파일 열기 전 존재 여부 확인
-        if not os.path.exists(VERSION_FILE_PATH):
-            # 파일이 없으면 기본 버전 정보 반환
-            data = {
-                "version": "1.0.0",
-                "lastUpdated": datetime.now().isoformat(),
-                "notes": "기본 버전"
-            }
-        else:
-            # 매 요청마다 파일 읽기 (캐싱 없음)
-            with open(VERSION_FILE_PATH, 'r') as f:
-                data = json.load(f)
-        
-        # 캐시 방지 헤더 설정
-        response = make_response(jsonify(data))
-        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Expires'] = '0'
-        
-        return response
-    except Exception as e:
-        logger.error(f"버전 정보 로드 실패: {str(e)}")
-        return jsonify({"error": "버전 정보를 불러올 수 없습니다", "version": "unknown"}), 500
 
 @app.route('/api/blog-feed')
 def blog_feed():
