@@ -1171,6 +1171,23 @@ def send_consultation_email(customer_data):
         logger.error(f"이메일 발송 실패: {str(e)}")
         return False
 
+@app.route('/version.json')
+def version_info():
+    """웹 앱 버전 정보 제공"""
+    # 캐시 방지 헤더 설정
+    response = make_response(jsonify({
+        "version": "1.2.0",  # 버전 정보 업데이트 시 수정
+        "lastUpdated": "2025-05-23T09:00:00Z",
+        "notes": "최신 기능 업데이트 및 버그 수정"
+    }))
+    
+    # 캐시 방지 헤더 설정
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    
+    return response
+
 @app.route('/api/blog-feed')
 def blog_feed():
     now = datetime.now()
