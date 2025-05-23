@@ -3,6 +3,7 @@ import requests
 import os
 import re
 import json
+from pathlib import Path
 from dotenv import load_dotenv
 from flask_cors import CORS
 import logging
@@ -24,6 +25,9 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS")  # 발송용 이메일 주소
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")  # 앱 비밀번호
 ADMIN_EMAIL = "cs21.jeon@gmail.com"  # 관리자 이메일
+
+# 버전 파일 경로 설정 - 절대 경로 사용
+VERSION_FILE_PATH = '/home/sftpuser/www/version.json'
 
 # 환경 변수 로드
 load_dotenv()
@@ -1173,20 +1177,31 @@ def send_consultation_email(customer_data):
 
 @app.route('/version.json')
 def version_info():
-    """웹 앱 버전 정보 제공"""
-    # 캐시 방지 헤더 설정
-    response = make_response(jsonify({
-        "version": "1.2.0",  # 버전 정보 업데이트 시 수정
-        "lastUpdated": "2025-05-23T09:00:00Z",
-        "notes": "최신 기능 업데이트 및 버그 수정"
-    }))
-    
-    # 캐시 방지 헤더 설정
-    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
-    
-    return response
+    """웹 앱 버전 정보 제공 - 파일에서 동적 로드"""
+    try:
+        # 파일 열기 전 존재 여부 확인
+        if not os.path.exists(VERSION_FILE_PATH):
+            # 파일이 없으면 기본 버전 정보 반환
+            data = {
+                "version": "1.0.0",
+                "lastUpdated": datetime.now().isoformat(),
+                "notes": "기본 버전"
+            }
+        else:
+            # 매 요청마다 파일 읽기 (캐싱 없음)
+            with open(VERSION_FILE_PATH, 'r') as f:
+                data = json.load(f)
+        
+        # 캐시 방지 헤더 설정
+        response = make_response(jsonify(data))
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        
+        return response
+    except Exception as e:
+        logger.error(f"버전 정보 로드 실패: {str(e)}")
+        return jsonify({"error": "버전 정보를 불러올 수 없습니다", "version": "unknown"}), 500
 
 @app.route('/api/blog-feed')
 def blog_feed():
