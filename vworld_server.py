@@ -3,6 +3,9 @@ import requests
 import os
 import re
 import json
+import asyncio
+import threading
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 from flask_cors import CORS
@@ -19,6 +22,17 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+import undetected_chrome as uc  # 더 안정적인 Chrome 드라이버
+
+# 글로벌 브라우저 인스턴스
+browser_instance = None
+browser_lock = threading.Lock()
 
 # 이메일 설정 - 환경 변수에서 읽기
 SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
@@ -1278,6 +1292,326 @@ def send_consultation_email(customer_data):
         import traceback
         logger.error(f"오류 상세: {traceback.format_exc()}")
         return False
+
+class GoogleMessagesAutomation:
+    def __init__(self):
+        self.driver = None
+        self.is_logged_in = False
+        self.last_check_time = datetime.now()
+        
+    def setup_browser(self):
+        """Chrome 브라우저 설정 및 시작"""
+        try:
+            options = uc.ChromeOptions()
+            
+            # 헤드리스 모드 (서버 환경용)
+            # options.add_argument('--headless')  # 개발 중에는 주석 처리
+            
+            # 브라우저 옵션 설정
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--window-size=1920,1080')
+            
+            # 사용자 데이터 디렉토리 (로그인 상태 유지용)
+            options.add_argument('--user-data-dir=/tmp/chrome-user-data')
+            
+            # 알림 비활성화
+            prefs = {
+                "profile.default_content_setting_values.notifications": 2
+            }
+            options.add_experimental_option("prefs", prefs)
+            
+            self.driver = uc.Chrome(options=options)
+            logger.info("Chrome 브라우저가 시작되었습니다.")
+            return True
+            
+        except Exception as e:
+            logger.error(f"브라우저 설정 실패: {str(e)}")
+            return False
+    
+    def login_to_google_messages(self):
+        """구글 메시지 웹에 로그인"""
+        try:
+            if not self.driver:
+                if not self.setup_browser():
+                    return False
+            
+            # 구글 메시지 웹 접속
+            self.driver.get('https://messages.google.com/web')
+            
+            # QR 코드 스캔 대기 또는 이미 로그인된 상태 확인
+            wait = WebDriverWait(self.driver, 60)  # 60초 대기
+            
+            try:
+                # 이미 로그인된 경우 새 대화 버튼이 있는지 확인
+                start_chat_button = wait.until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-e2e-start-chat], [aria-label="Start chat"]'))
+                )
+                self.is_logged_in = True
+                logger.info("구글 메시지에 이미 로그인되어 있습니다.")
+                return True
+                
+            except TimeoutException:
+                # QR 코드 스캔 필요
+                logger.info("QR 코드를 스캔하여 로그인해주세요. 60초 대기 중...")
+                
+                # QR 코드 스캔 완료 대기
+                try:
+                    start_chat_button = wait.until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-e2e-start-chat], [aria-label="Start chat"]'))
+                    )
+                    self.is_logged_in = True
+                    logger.info("QR 코드 스캔이 완료되고 로그인되었습니다.")
+                    return True
+                    
+                except TimeoutException:
+                    logger.error("로그인 시간이 초과되었습니다.")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"구글 메시지 로그인 실패: {str(e)}")
+            return False
+    
+    def send_message(self, phone_number, message):
+        """메시지 전송"""
+        try:
+            if not self.is_logged_in:
+                if not self.login_to_google_messages():
+                    return False
+            
+            wait = WebDriverWait(self.driver, 30)
+            
+            # 새 대화 시작 버튼 클릭
+            start_chat = wait.until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-e2e-start-chat], [aria-label="Start chat"]'))
+            )
+            start_chat.click()
+            
+            # 전화번호 입력 필드 찾기 및 입력
+            phone_input = wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type="tel"], input[placeholder*="phone"], input[placeholder*="전화"]'))
+            )
+            phone_input.clear()
+            phone_input.send_keys(phone_number)
+            
+            # 잠시 대기 (자동완성 등을 위해)
+            time.sleep(2)
+            
+            # 메시지 입력 필드 찾기
+            message_input = wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[contenteditable="true"], textarea[placeholder*="메시지"], textarea[placeholder*="Message"]'))
+            )
+            message_input.clear()
+            message_input.send_keys(message)
+            
+            # 전송 버튼 클릭
+            send_button = wait.until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-e2e-send-message], [aria-label="Send"], button[type="submit"]'))
+            )
+            send_button.click()
+            
+            logger.info(f"메시지 전송 완료: {phone_number}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"메시지 전송 실패 ({phone_number}): {str(e)}")
+            return False
+    
+    def close_browser(self):
+        """브라우저 종료"""
+        try:
+            if self.driver:
+                self.driver.quit()
+                self.driver = None
+                self.is_logged_in = False
+                logger.info("브라우저가 종료되었습니다.")
+        except Exception as e:
+            logger.error(f"브라우저 종료 실패: {str(e)}")
+
+# 글로벌 인스턴스
+google_messages = GoogleMessagesAutomation()
+
+def monitor_airtable_for_new_contacts():
+    """에어테이블 모니터링 함수 (1분마다 실행)"""
+    logger.info("에어테이블 모니터링을 시작합니다.")
+    
+    # 에어테이블 설정
+    airtable_key = os.environ.get("AIRTABLE_INQUIRY_KEY")
+    base_id = os.environ.get("AIRTABLE_INQUIRY_BASE_ID")
+    table_id = os.environ.get("AIRTABLE_INQUIRY_TABLE_ID")
+    
+    if not all([airtable_key, base_id, table_id]):
+        logger.error("에어테이블 설정이 완료되지 않았습니다.")
+        return
+    
+    headers = {
+        "Authorization": f"Bearer {airtable_key}",
+        "Content-Type": "application/json"
+    }
+    
+    while True:
+        try:
+            # 전송되지 않은 레코드 조회
+            url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
+            params = {
+                'filterByFormula': 'AND({연락처} != "", {SMS전송여부} != "완료")',
+                'maxRecords': 10,
+                'sort[0][field]': '생성일시',
+                'sort[0][direction]': 'desc'
+            }
+            
+            response = requests.get(url, headers=headers, params=params)
+            
+            if response.status_code == 200:
+                data = response.json()
+                records = data.get('records', [])
+                
+                logger.info(f"새로운 레코드 {len(records)}개 발견")
+                
+                for record in records:
+                    fields = record.get('fields', {})
+                    record_id = record.get('id')
+                    
+                    phone_number = fields.get('연락처', '').strip()
+                    property_type = fields.get('매물종류', '')
+                    message_content = fields.get('문의사항', '')
+                    
+                    if not phone_number:
+                        continue
+                    
+                    # SMS 메시지 템플릿 생성
+                    sms_message = create_sms_template(property_type, message_content)
+                    
+                    # 메시지 전송
+                    with browser_lock:
+                        success = google_messages.send_message(phone_number, sms_message)
+                    
+                    if success:
+                        # 에어테이블 레코드 업데이트 (전송 완료 표시)
+                        update_url = f"https://api.airtable.com/v0/{base_id}/{table_id}/{record_id}"
+                        update_data = {
+                            "fields": {
+                                "SMS전송여부": "완료",
+                                "SMS전송일시": datetime.now().isoformat()
+                            }
+                        }
+                        
+                        update_response = requests.patch(update_url, json=update_data, headers=headers)
+                        
+                        if update_response.status_code == 200:
+                            logger.info(f"SMS 전송 및 업데이트 완료: {phone_number}")
+                        else:
+                            logger.error(f"에어테이블 업데이트 실패: {update_response.text}")
+                    else:
+                        logger.error(f"SMS 전송 실패: {phone_number}")
+                        
+                        # 실패 시에도 상태 업데이트
+                        update_url = f"https://api.airtable.com/v0/{base_id}/{table_id}/{record_id}"
+                        update_data = {
+                            "fields": {
+                                "SMS전송여부": "실패",
+                                "SMS전송일시": datetime.now().isoformat()
+                            }
+                        }
+                        requests.patch(update_url, json=update_data, headers=headers)
+            
+            else:
+                logger.error(f"에어테이블 조회 실패: {response.text}")
+        
+        except Exception as e:
+            logger.error(f"모니터링 오류: {str(e)}")
+        
+        # 1분 대기
+        time.sleep(60)
+
+def create_sms_template(property_type, customer_message):
+    """SMS 메시지 템플릿 생성"""
+    template = f"""안녕하세요! 금토끼부동산입니다.
+
+{property_type} 관련 문의 주셔서 감사합니다.
+
+고객님 문의내용:
+{customer_message[:100]}{'...' if len(customer_message) > 100 else ''}
+
+빠른 시일 내에 상세한 매물 정보를 안내해드리겠습니다.
+
+추가 문의: 02-3471-7377
+📱 010-4019-6509
+
+금토끼부동산 드림"""
+    
+    return template
+
+# Flask 앱에 추가할 엔드포인트들
+
+@app.route('/api/sms/start-monitoring', methods=['POST'])
+def start_sms_monitoring():
+    """SMS 모니터링 시작"""
+    try:
+        # 브라우저 초기화 및 로그인
+        with browser_lock:
+            if google_messages.login_to_google_messages():
+                # 백그라운드 모니터링 스레드 시작
+                monitoring_thread = threading.Thread(target=monitor_airtable_for_new_contacts, daemon=True)
+                monitoring_thread.start()
+                
+                logger.info("SMS 모니터링이 시작되었습니다.")
+                return jsonify({"status": "success", "message": "SMS monitoring started"}), 200
+            else:
+                return jsonify({"status": "error", "message": "Google Messages login failed"}), 500
+                
+    except Exception as e:
+        logger.error(f"SMS 모니터링 시작 실패: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/sms/send-test', methods=['POST'])
+def send_test_sms():
+    """테스트 SMS 전송"""
+    try:
+        data = request.json
+        phone_number = data.get('phone_number')
+        message = data.get('message', '테스트 메시지입니다.')
+        
+        if not phone_number:
+            return jsonify({"status": "error", "message": "Phone number required"}), 400
+        
+        with browser_lock:
+            success = google_messages.send_message(phone_number, message)
+        
+        if success:
+            return jsonify({"status": "success", "message": "Test SMS sent successfully"}), 200
+        else:
+            return jsonify({"status": "error", "message": "Failed to send test SMS"}), 500
+            
+    except Exception as e:
+        logger.error(f"테스트 SMS 전송 실패: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/sms/status', methods=['GET'])
+def get_sms_status():
+    """SMS 시스템 상태 확인"""
+    try:
+        status = {
+            "browser_active": google_messages.driver is not None,
+            "logged_in": google_messages.is_logged_in,
+            "last_check": google_messages.last_check_time.isoformat() if google_messages.last_check_time else None
+        }
+        return jsonify(status), 200
+        
+    except Exception as e:
+        logger.error(f"SMS 상태 확인 실패: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# 애플리케이션 종료 시 브라우저 정리
+import atexit
+
+def cleanup_browser():
+    """애플리케이션 종료 시 브라우저 정리"""
+    with browser_lock:
+        google_messages.close_browser()
+
+atexit.register(cleanup_browser)
 
 @app.route('/api/blog-feed')
 def blog_feed():
