@@ -28,7 +28,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-import undetected_chrome as uc  # 더 안정적인 Chrome 드라이버
+import undetected_chromedriver as uc  # 더 안정적인 Chrome 드라이버
 
 # 글로벌 브라우저 인스턴스
 browser_instance = None
