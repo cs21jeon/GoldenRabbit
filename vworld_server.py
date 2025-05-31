@@ -271,6 +271,180 @@ def submit_inquiry():
         logger.error(f"상담 접수 전체 오류: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/category-property', methods=['GET'])
+def get_category_property():
+    """카테고리별 대표 매물 가져오기"""
+    try:
+        # 뷰 ID 파라미터 받기
+        view_id = request.args.get('view')
+        if not view_id:
+            return jsonify({"error": "View ID parameter is required"}), 400
+        
+        logger.info(f"카테고리 대표 매물 요청: view_id = {view_id}")
+        
+        # 환경 변수에서 Airtable 설정 읽기
+        airtable_key = os.environ.get("AIRTABLE_API_KEY")
+        base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73") 
+        table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
+        
+        if not airtable_key:
+            logger.error("AIRTABLE_API_KEY not set")
+            return jsonify({"error": "Airtable API key not set"}), 500
+            
+        headers = {
+            "Authorization": f"Bearer {airtable_key}"
+        }
+        
+        # Airtable API URL 구성
+        url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
+        
+        # 파라미터 설정: 지정된 뷰에서 '대표' 필드가 체크된 레코드만 가져오기
+        params = {
+            'view': view_id,
+            'filterByFormula': '{대표} = TRUE()',  # '대표' 필드가 체크된 항목만
+            'maxRecords': 1,  # 하나만 가져오기
+            'sort[0][field]': '매가(만원)',  # 매가 기준 정렬 (옵션)
+            'sort[0][direction]': 'asc'
+        }
+        
+        logger.info(f"Airtable 요청: {url}")
+        logger.info(f"파라미터: {params}")
+        
+        # Airtable API 호출
+        response = requests.get(url, headers=headers, params=params)
+        
+        logger.info(f"Airtable 응답 상태: {response.status_code}")
+        
+        if response.status_code != 200:
+            logger.error(f"Airtable API 오류: {response.text}")
+            return jsonify({
+                "error": "Airtable data fetch failed",
+                "details": response.text,
+                "status_code": response.status_code
+            }), response.status_code
+        
+        # 응답 데이터 파싱
+        data = response.json()
+        records = data.get('records', [])
+        
+        logger.info(f"조회된 레코드 수: {len(records)}")
+        
+        # 레코드가 없는 경우
+        if not records:
+            logger.warning(f"뷰 {view_id}에서 대표 매물을 찾을 수 없습니다.")
+            return jsonify({
+                "error": "No representative property found",
+                "message": "해당 카테고리에 대표로 설정된 매물이 없습니다.",
+                "records": []
+            }), 404
+        
+        # 첫 번째 레코드의 필드 로깅 (디버깅용)
+        first_record = records[0]
+        logger.info(f"대표 매물 ID: {first_record.get('id')}")
+        logger.info(f"대표 매물 주소: {first_record.get('fields', {}).get('지번 주소', 'Unknown')}")
+        logger.info(f"사용 가능한 필드: {', '.join(first_record.get('fields', {}).keys())}")
+        
+        # 성공 응답
+        response_data = {
+            "records": records,
+            "view_id": view_id,
+            "total_count": len(records)
+        }
+        
+        return jsonify(response_data), 200
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"네트워크 오류: {str(e)}")
+        return jsonify({
+            "error": "Network error",
+            "details": str(e)
+        }), 500
+        
+    except Exception as e:
+        logger.error(f"카테고리 매물 API 오류: {str(e)}")
+        import traceback
+        logger.error(f"상세 오류: {traceback.format_exc()}")
+        return jsonify({
+            "error": "Internal server error",
+            "details": str(e)
+        }), 500
+
+# 헬스 체크용 엔드포인트 (기존에 있다면 생략)
+@app.route('/api/test-category-views')
+def test_category_views():
+    """카테고리 뷰들을 테스트하는 엔드포인트 (개발/디버깅용)"""
+    try:
+        view_ids = [
+            'viwzEVzrr47fCbDNU',  # 재건축용 토지
+            'viwxS4dKAcQWmB0Be',  # 고수익률 건물
+            'viwUKnawSP8SkV9Sx'   # 저가단독주택
+        ]
+        
+        categories = [
+            '재건축용 토지',
+            '고수익률 건물', 
+            '저가단독주택'
+        ]
+        
+        results = {}
+        
+        airtable_key = os.environ.get("AIRTABLE_API_KEY")
+        if not airtable_key:
+            return jsonify({"error": "Airtable API key not set"}), 500
+            
+        headers = {"Authorization": f"Bearer {airtable_key}"}
+        base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
+        table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
+        
+        for i, view_id in enumerate(view_ids):
+            try:
+                url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
+                params = {
+                    'view': view_id,
+                    'maxRecords': 5  # 테스트용으로 5개만
+                }
+                
+                response = requests.get(url, headers=headers, params=params)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    records = data.get('records', [])
+                    
+                    # 대표 필드가 있는 레코드 찾기
+                    representative_records = [
+                        r for r in records 
+                        if r.get('fields', {}).get('대표') == True
+                    ]
+                    
+                    results[categories[i]] = {
+                        'view_id': view_id,
+                        'total_records': len(records),
+                        'representative_records': len(representative_records),
+                        'status': 'success',
+                        'sample_fields': list(records[0].get('fields', {}).keys()) if records else []
+                    }
+                    
+                    if representative_records:
+                        results[categories[i]]['sample_address'] = representative_records[0].get('fields', {}).get('지번 주소', 'Unknown')
+                else:
+                    results[categories[i]] = {
+                        'view_id': view_id,
+                        'status': 'error',
+                        'error': response.text
+                    }
+                    
+            except Exception as e:
+                results[categories[i]] = {
+                    'view_id': view_id,
+                    'status': 'exception',
+                    'error': str(e)
+                }
+        
+        return jsonify(results), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/property-list', methods=['GET'])
 def get_property_list():
     airtable_key = os.environ.get("AIRTABLE_API_KEY")
