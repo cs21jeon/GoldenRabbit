@@ -265,7 +265,7 @@ def create_map():
         price_display = f"{price:,}만원" if isinstance(price, int) and price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.') if isinstance(price, int) else (price or "가격정보 없음")
 
         # 에어테이블 레코드 링크 생성
-        airtable_record_url = f"https://airtable.com/{base_id}/{table_id}/viwyV15T4ihMpbDbr/{record_id}?blocks=hide"
+        detail_url = f"/property-detail.html?id={record_id}"
         
         # 개선된 팝업 HTML 구조
         popup_html = f"""
@@ -289,7 +289,7 @@ def create_map():
             popup_html += f'<div class="popup-info">용도: {field_values["주용도"]}</div>'
         
         # 상세내역 보기 링크 추가
-        popup_html += f'<a href="{airtable_record_url}" target="_blank" class="detail-link">상세내역보기-클릭</a>'
+        popup_html += f'<a href="{detail_url}" class="detail-link">상세내역보기-클릭</a>'
         # 이 매물 문의하기 링크 추가
         popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" class="detail-link" style="background-color:#2962FF; color:white; margin-top:5px;">이 매물 문의하기</a>'
 
