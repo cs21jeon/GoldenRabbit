@@ -1231,12 +1231,12 @@ def search_map():
             detail_url = f"/property-detail.html?id={record_id}"
             popup_html += f'''
             <a href="javascript:void(0);" 
-                onclick="window.parent.postMessage({{action: 'openPropertyDetail', recordId: '{record_id}'}}, '*')"
+                onclick="(function() {{ try {{ parent.openPropertyDetailGlobal('{record_id}'); }} catch(e) {{ window.parent.postMessage({{action:'openPropertyDetail',recordId:'{record_id}'}}, '*'); }} }})();"
                 style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">
                 상세내역보기
             </a>
             <a href="javascript:void(0);" 
-                onclick="window.parent.postMessage({{action: 'openConsultModal', address: '{address}'}}, '*')"
+                onclick="(function() {{ try {{ parent.openConsultModalGlobal('{address}'); }} catch(e) {{ window.parent.postMessage({{action:'openConsultModal',address:'{address}'}}, '*'); }} }})();"
                 style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">
                 이 매물 문의하기
             </a>
