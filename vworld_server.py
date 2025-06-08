@@ -22,29 +22,13 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-import undetected_chromedriver as uc  # 더 안정적인 Chrome 드라이버
-
-# 글로벌 브라우저 인스턴스
-browser_instance = None
-browser_lock = threading.Lock()
-monitoring_thread = None
-monitoring_active = False
-
-# 이메일 설정 - 환경 변수에서 읽기
-SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS")  # 발송용 이메일 주소
-EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")  # 앱 비밀번호
-ADMIN_EMAIL = "cs21.jeon@gmail.com"  # 관리자 이메일
 
 # 버전 파일 경로 설정 - 절대 경로 사용
 VERSION_FILE_PATH = '/home/sftpuser/www/version.json'
+
+# 백업 데이터 관련 경로 설정
+BACKUP_DIR = '/home/sftpuser/airtable_backup'
+LATEST_BACKUP_DIR = os.path.join(BACKUP_DIR, 'latest')
 
 # 환경 변수 로드
 load_dotenv()
@@ -271,6 +255,545 @@ def submit_inquiry():
         logger.error(f"상담 접수 전체 오류: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/backup-status')
+def backup_status():
+    """백업 상태 확인 엔드포인트"""
+    try:
+        metadata_path = os.path.join(LATEST_BACKUP_DIR, 'metadata.json')
+        
+        if not os.path.exists(metadata_path):
+            return jsonify({
+                "status": "error",
+                "message": "백업 메타데이터를 찾을 수 없습니다."
+            }), 404
+        
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+        
+        # 백업 파일들의 존재 여부 확인
+        files_status = {}
+        for view_name, view_info in {
+            'all': 'all_properties.json',
+            'reconstruction': 'reconstruction_properties.json',
+            'high_yield': 'high_yield_properties.json',
+            'low_cost': 'low_cost_properties.json'
+        }.items():
+            file_path = os.path.join(LATEST_BACKUP_DIR, view_info)
+            files_status[view_name] = os.path.exists(file_path)
+        
+        return jsonify({
+            "status": "success",
+            "metadata": metadata,
+            "files": files_status
+        })
+        
+    except Exception as e:
+        logger.error(f"백업 상태 확인 오류: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": f"백업 상태 확인 중 오류 발생: {str(e)}"
+        }), 500
+
+@app.route('/api/property-list-backup')
+def get_property_list_backup():
+    """백업된 매물 목록 가져오기"""
+    try:
+        # 모든 매물 데이터 가져오기
+        all_properties_path = os.path.join(LATEST_BACKUP_DIR, 'all_properties.json')
+        
+        if not os.path.exists(all_properties_path):
+            # 백업 파일이 없는 경우 기존 API로 폴백
+            return get_property_list()
+        
+        with open(all_properties_path, 'r', encoding='utf-8') as f:
+            records = json.load(f)
+        
+        # 에어테이블 API 응답 형식과 동일하게 포맷
+        response_data = {
+            "records": records
+        }
+        
+        return jsonify(response_data), 200
+        
+    except Exception as e:
+        logger.error(f"백업 매물 목록 조회 오류: {str(e)}")
+        # 오류 발생 시 기존 API로 폴백
+        return get_property_list()
+
+@app.route('/api/category-property-backup')
+def get_category_property_backup():
+    """백업된 카테고리별 대표 매물 가져오기"""
+    try:
+        # 뷰 ID 파라미터 받기
+        view_id = request.args.get('view')
+        if not view_id:
+            return jsonify({"error": "View ID parameter is required"}), 400
+        
+        # 뷰 ID에 따른 파일 선택
+        filename = None
+        if view_id == 'viwzEVzrr47fCbDNU':  # 재건축용 토지
+            filename = 'reconstruction_properties.json'
+        elif view_id == 'viwxS4dKAcQWmB0Be':  # 고수익률 건물
+            filename = 'high_yield_properties.json'
+        elif view_id == 'viwUKnawSP8SkV9Sx':  # 저가단독주택
+            filename = 'low_cost_properties.json'
+        else:
+            # 정의되지 않은 뷰 ID인 경우 기존 API로 폴백
+            return get_category_property()
+        
+        file_path = os.path.join(LATEST_BACKUP_DIR, filename)
+        
+        if not os.path.exists(file_path):
+            # 백업 파일이 없는 경우 기존 API로 폴백
+            return get_category_property()
+        
+        # 파일에서 데이터 로드
+        with open(file_path, 'r', encoding='utf-8') as f:
+            all_records = json.load(f)
+        
+        # '대표' 필드가 체크된 레코드만 필터링
+        representative_records = [
+            r for r in all_records
+            if r.get('fields', {}).get('대표') == True
+        ]
+        
+        # 결과가 없으면 모든 레코드 중 첫 번째 사용
+        if not representative_records and all_records:
+            representative_records = [all_records[0]]
+        
+        # 성공 응답
+        response_data = {
+            "records": representative_records,
+            "view_id": view_id,
+            "total_count": len(representative_records),
+            "source": "backup"  # 백업에서 가져왔음을 표시
+        }
+        
+        return jsonify(response_data), 200
+        
+    except Exception as e:
+        logger.error(f"백업 카테고리 매물 API 오류: {str(e)}")
+        import traceback
+        logger.error(f"상세 오류: {traceback.format_exc()}")
+        # 오류 발생 시 기존 API로 폴백
+        return get_category_property()
+
+@app.route('/api/category-properties-backup')
+def get_category_properties_backup():
+    """백업된 특정 카테고리의 모든 매물 가져오기"""
+    try:
+        # 뷰 ID 파라미터 받기
+        view_id = request.args.get('view')
+        if not view_id:
+            return jsonify({"error": "View ID parameter is required"}), 400
+        
+        # 뷰 ID에 따른 파일 선택
+        filename = None
+        if view_id == 'viwzEVzrr47fCbDNU':  # 재건축용 토지
+            filename = 'reconstruction_properties.json'
+        elif view_id == 'viwxS4dKAcQWmB0Be':  # 고수익률 건물
+            filename = 'high_yield_properties.json'
+        elif view_id == 'viwUKnawSP8SkV9Sx':  # 저가단독주택
+            filename = 'low_cost_properties.json'
+        else:
+            # 정의되지 않은 뷰 ID인 경우
+            return jsonify({"error": "Invalid view ID"}), 400
+        
+        file_path = os.path.join(LATEST_BACKUP_DIR, filename)
+        
+        if not os.path.exists(file_path):
+            return jsonify({"error": "Backup file not found"}), 404
+        
+        # 파일에서 데이터 로드
+        with open(file_path, 'r', encoding='utf-8') as f:
+            records = json.load(f)
+        
+        # 유효한 상태인 레코드만 필터링
+        valid_status = ["네이버", "디스코", "당근", "비공개"]
+        
+        filtered_records = []
+        for record in records:
+            fields = record.get('fields', {})
+            status = fields.get('현황')
+            is_valid_status = False
+            
+            if status:
+                if isinstance(status, list):
+                    is_valid_status = any(s in valid_status for s in status)
+                elif isinstance(status, str):
+                    is_valid_status = status in valid_status
+            
+            if is_valid_status:
+                filtered_records.append(record)
+        
+        # 성공 응답
+        response_data = {
+            "records": filtered_records,
+            "view_id": view_id,
+            "total_count": len(filtered_records),
+            "source": "backup"
+        }
+        
+        return jsonify(response_data), 200
+        
+    except Exception as e:
+        logger.error(f"백업 카테고리 매물 목록 API 오류: {str(e)}")
+        import traceback
+        logger.error(f"상세 오류: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/property-detail-backup')
+def get_property_detail_backup():
+    """백업된 데이터에서 특정 매물 상세 정보 가져오기"""
+    try:
+        # 매물 ID 파라미터 받기
+        property_id = request.args.get('id')
+        if not property_id:
+            return jsonify({"error": "Property ID parameter is required"}), 400
+        
+        # 모든 매물 데이터 파일 로드
+        file_path = os.path.join(LATEST_BACKUP_DIR, 'all_properties.json')
+        
+        if not os.path.exists(file_path):
+            return jsonify({"error": "Backup file not found"}), 404
+        
+        # 파일에서 데이터 로드
+        with open(file_path, 'r', encoding='utf-8') as f:
+            records = json.load(f)
+        
+        # ID로 매물 찾기
+        property_data = None
+        for record in records:
+            if record.get('id') == property_id:
+                property_data = record
+                break
+        
+        if not property_data:
+            return jsonify({"error": "Property not found"}), 404
+        
+        # 성공 응답
+        response_data = {
+            "property": property_data,
+            "source": "backup"
+        }
+        
+        return jsonify(response_data), 200
+        
+    except Exception as e:
+        logger.error(f"백업 매물 상세 API 오류: {str(e)}")
+        import traceback
+        logger.error(f"상세 오류: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/search-map-backup', methods=['POST'])@app.route('/api/search-map-backup', methods=['POST'])
+def search_map_backup():
+    """백업 데이터에서 검색 조건에 따른 동적 지도 생성"""
+    try:
+        import folium
+        from datetime import datetime
+        
+        # 검색 조건 받기
+        search_conditions = request.json
+        logger.info(f"Search conditions: {search_conditions}")
+        
+        # 백업 파일에서 데이터 로드
+        all_properties_path = os.path.join(LATEST_BACKUP_DIR, 'all_properties.json')
+        
+        if not os.path.exists(all_properties_path):
+            # 백업 파일이 없는 경우 기존 API로 폴백
+            logger.warning("백업 파일을 찾을 수 없어 기존 API로 폴백합니다.")
+            return search_map()
+        
+        with open(all_properties_path, 'r', encoding='utf-8') as f:
+            all_records = json.load(f)
+        
+        logger.info(f"백업에서 {len(all_records)}개 레코드를 로드했습니다.")
+        
+        # 필터링 처리
+        filtered_records = []
+        status_filtered_count = 0
+        condition_filtered_count = 0
+        geocoding_failed_count = 0
+        
+        # 검색 조건 디버깅
+        active_filters = []
+        if search_conditions.get('price_value', '').strip():
+            active_filters.append(f"가격 {search_conditions['price_condition']} {search_conditions['price_value']}")
+        if search_conditions.get('yield_value', '').strip():
+            active_filters.append(f"수익률 {search_conditions['yield_condition']} {search_conditions['yield_value']}")
+        
+        logger.info(f"활성 필터: {', '.join(active_filters) if active_filters else '없음'}")
+        
+        for i, record in enumerate(all_records):
+            fields = record.get('fields', {})
+            
+            # 처음 5개 레코드의 필드값 로깅
+            if i < 5:
+                logger.debug(f"Record {i} - 주소: {fields.get('지번 주소', '')}")
+                logger.debug(f"  매가: {fields.get('매가(만원)', '')}")
+                logger.debug(f"  수익률: {fields.get('융자제외수익률(%)', '')}")
+            
+            # 현황 필드 확인
+            status = fields.get('현황')
+            valid_status = ["네이버", "디스코", "당근", "비공개"]
+            is_valid_status = False
+            
+            if status:
+                if isinstance(status, list):
+                    is_valid_status = any(s in valid_status for s in status)
+                elif isinstance(status, str):
+                    is_valid_status = status in valid_status
+            
+            # 유효한 상태가 아니면 건너뛰기
+            if not is_valid_status:
+                status_filtered_count += 1
+                continue
+            
+            # 각 조건 확인
+            should_include = True
+            filter_reasons = []
+            
+            # 매가 조건
+            if search_conditions.get('price_value', '').strip() and search_conditions.get('price_condition') != 'all':
+                price_raw = fields.get('매가(만원)', 0)
+                try:
+                    # price가 문자열인 경우 숫자로 변환
+                    if isinstance(price_raw, str):
+                        price = float(price_raw.replace(',', ''))
+                    else:
+                        price = float(price_raw) if price_raw else 0
+                    
+                    price_val = float(search_conditions['price_value'])
+                    
+                    if i < 5:  # 디버깅
+                        logger.debug(f"  가격 필터링: {price} {search_conditions['price_condition']} {price_val}")
+                    
+                    if search_conditions['price_condition'] == 'above' and price < price_val:
+                        should_include = False
+                        filter_reasons.append(f"가격 {price} < {price_val}")
+                    elif search_conditions['price_condition'] == 'below' and price > price_val:
+                        should_include = False
+                        filter_reasons.append(f"가격 {price} > {price_val}")
+                except Exception as e:
+                    logger.warning(f"Price parsing error for record {i}: {e}, raw value: {price_raw}")
+            
+            # 수익률 조건
+            if should_include and search_conditions.get('yield_value', '').strip() and search_conditions.get('yield_condition') != 'all':
+                yield_raw = fields.get('융자제외수익률(%)', 0)
+                try:
+                    # yield_rate가 문자열인 경우 숫자로 변환
+                    if isinstance(yield_raw, str):
+                        yield_rate = float(yield_raw.replace(',', '').replace('%', ''))
+                    else:
+                        yield_rate = float(yield_raw) if yield_raw else 0
+                    
+                    yield_val = float(search_conditions['yield_value'])
+                    
+                    if i < 5:  # 디버깅
+                        logger.debug(f"  수익률 필터링: {yield_rate} {search_conditions['yield_condition']} {yield_val}")
+                    
+                    if search_conditions['yield_condition'] == 'above' and yield_rate < yield_val:
+                        should_include = False
+                        filter_reasons.append(f"수익률 {yield_rate} < {yield_val}")
+                    elif search_conditions['yield_condition'] == 'below' and yield_rate > yield_val:
+                        should_include = False
+                        filter_reasons.append(f"수익률 {yield_rate} > {yield_val}")
+                except Exception as e:
+                    logger.warning(f"Yield parsing error for record {i}: {e}, raw value: {yield_raw}")
+            
+            # 실투자금 조건
+            if should_include and search_conditions.get('investment_value', '').strip() and search_conditions.get('investment_condition') != 'all':
+                investment_raw = fields.get('실투자금', 0)
+                try:
+                    if isinstance(investment_raw, str):
+                        investment = float(investment_raw.replace(',', ''))
+                    else:
+                        investment = float(investment_raw) if investment_raw else 0
+                    
+                    investment_val = float(search_conditions['investment_value'])
+                    
+                    if search_conditions['investment_condition'] == 'above' and investment < investment_val:
+                        should_include = False
+                        filter_reasons.append(f"실투자금 {investment} < {investment_val}")
+                    elif search_conditions['investment_condition'] == 'below' and investment > investment_val:
+                        should_include = False
+                        filter_reasons.append(f"실투자금 {investment} > {investment_val}")
+                except Exception as e:
+                    logger.warning(f"Investment parsing error: {e}")
+            
+            # 토지면적 조건
+            if should_include and search_conditions.get('area_value', '').strip() and search_conditions.get('area_condition') != 'all':
+                area_raw = fields.get('토지면적(㎡)', 0)
+                try:
+                    if isinstance(area_raw, str):
+                        area = float(area_raw.replace(',', ''))
+                    else:
+                        area = float(area_raw) if area_raw else 0
+                    
+                    area_val = float(search_conditions['area_value'])
+                    
+                    if search_conditions['area_condition'] == 'above' and area < area_val:
+                        should_include = False
+                        filter_reasons.append(f"토지면적 {area} < {area_val}")
+                    elif search_conditions['area_condition'] == 'below' and area > area_val:
+                        should_include = False
+                        filter_reasons.append(f"토지면적 {area} > {area_val}")
+                except Exception as e:
+                    logger.warning(f"Area parsing error: {e}")
+            
+            # 사용승인일 조건
+            if should_include and search_conditions.get('approval_date', '').strip() and search_conditions.get('approval_condition') != 'all':
+                approval = fields.get('사용승인일', '')
+                try:
+                    if approval and approval.strip():
+                        approval_datetime = datetime.strptime(approval.strip(), '%Y-%m-%d')
+                        target_datetime = datetime.strptime(search_conditions['approval_date'], '%Y-%m-%d')
+                        
+                        if search_conditions['approval_condition'] == 'before' and approval_datetime >= target_datetime:
+                            should_include = False
+                            filter_reasons.append(f"사용승인일 {approval} >= {search_conditions['approval_date']}")
+                        elif search_conditions['approval_condition'] == 'after' and approval_datetime <= target_datetime:
+                            should_include = False
+                            filter_reasons.append(f"사용승인일 {approval} <= {search_conditions['approval_date']}")
+                except Exception as e:
+                    logger.warning(f"Date parsing error: {e}, approval date: {approval}")
+            
+            if not should_include:
+                condition_filtered_count += 1
+                if i < 10:  # 처음 10개만 로그
+                    logger.info(f"Record {i} filtered out: {fields.get('지번 주소', 'Unknown')} - Reasons: {filter_reasons}")
+            else:
+                filtered_records.append(record)
+        
+        logger.info(f"필터링 요약:")
+        logger.info(f"  - 전체 레코드: {len(all_records)}")
+        logger.info(f"  - 상태 필터링: {status_filtered_count}")
+        logger.info(f"  - 조건 필터링: {condition_filtered_count}")
+        logger.info(f"  - 필터 통과: {len(filtered_records)}")
+        
+        # 지도 생성
+        folium_map = folium.Map(location=[37.4834458778777, 126.970207234818], zoom_start=15)
+        
+        # 타일 레이어 추가
+        folium.TileLayer(
+            tiles='https://goldenrabbit.biz/api/vtile?z={z}&y={y}&x={x}',
+            attr='공간정보 오픈플랫폼(브이월드)',
+            name='브이월드 배경지도',
+        ).add_to(folium_map)
+        
+        # 마커 추가
+        added_markers = 0
+        for record in filtered_records:
+            fields = record.get('fields', {})
+            address = fields.get('지번 주소')
+            price = fields.get('매가(만원)')
+            record_id = record.get('id')
+            
+            if not address:
+                logger.warning("No address found in record")
+                continue
+                
+            # 주소 지오코딩
+            try:
+                geo_data, _ = get_geocode(address)
+                if geo_data.get("response", {}).get("status") == "OK":
+                    result = geo_data["response"]["result"]
+                    lat = float(result["point"]["y"])
+                    lon = float(result["point"]["x"])
+                else:
+                    geocoding_failed_count += 1
+                    continue
+            except Exception as e:
+                logger.warning(f"Geocoding error for {address}: {e}")
+                geocoding_failed_count += 1
+                continue
+            
+            # 가격 표시 형식
+            try:
+                if isinstance(price, (int, float)):
+                    price_display = f"{int(price):,}만원" if price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.')
+                else:
+                    price_display = "가격정보 없음"
+            except:
+                price_display = "가격정보 없음"
+            
+            # 팝업 HTML - 에어테이블 링크 대신 내부 상세 페이지 링크 사용
+            popup_html = f"""
+            <div style="font-family: 'Noto Sans KR', sans-serif;">
+                <div style="font-size: 16px; font-weight: bold; margin-bottom: 6px;">{address}</div>
+                <div style="color: #444;">매가: {price_display}</div>
+            """
+            
+            if fields.get('토지면적(㎡)'):
+                try:
+                    sqm = float(fields['토지면적(㎡)'])
+                    pyeong = round(sqm / 3.3058)
+                    popup_html += f'<div style="color: #444;">대지: {pyeong}평 ({sqm}㎡)</div>'
+                except:
+                    pass
+            
+            if fields.get('층수'):
+                popup_html += f'<div style="color: #444;">층수: {fields["층수"]}</div>'
+            
+            if fields.get('주용도'):
+                popup_html += f'<div style="color: #444;">용도: {fields["주용도"]}</div>'
+            
+            # 내부 상세 페이지 링크 사용
+            detail_url = f"/property-detail.html?id={record_id}"
+            popup_html += f'<a href="{detail_url}" target="_blank" style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">상세내역보기</a>'
+            popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">이 매물 문의하기</a>'
+            popup_html += "</div>"
+            
+            # 가격 말풍선 아이콘
+            bubble_html = f"""
+            <div style="background-color: #fff; border: 2px solid #e38000; border-radius: 6px; 
+                       box-shadow: 0 2px 5px rgba(0,0,0,0.2); padding: 3px 6px; font-size: 13px; 
+                       font-weight: bold; color: #e38000; white-space: nowrap; text-align: center;">
+                {price_display}
+            </div>
+            """
+            
+            icon = folium.DivIcon(
+                html=bubble_html,
+                icon_size=(100, 40),
+                icon_anchor=(50, 40)
+            )
+            
+            folium.Marker(
+                location=[lat, lon],
+                popup=folium.Popup(popup_html, max_width=250),
+                icon=icon
+            ).add_to(folium_map)
+            
+            added_markers += 1
+        
+        logger.info(f"지도에 {added_markers}개의 마커를 추가했습니다.")
+        logger.info(f"지오코딩 실패: {geocoding_failed_count}개 주소")
+        
+        # HTML 문자열로 반환
+        map_html = folium_map._repr_html_()
+        
+        return jsonify({
+            "map_html": map_html,
+            "count": len(filtered_records),
+            "statistics": {
+                "total_records": len(all_records),
+                "status_filtered": status_filtered_count,
+                "condition_filtered": condition_filtered_count,
+                "passed_filter": len(filtered_records),
+                "geocoding_failed": geocoding_failed_count,
+                "markers_added": added_markers,
+                "source": "backup"  # 백업 데이터 사용 표시
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"백업 데이터 검색 오류: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        # 오류 발생 시 기존 API로 폴백
+        return search_map()
+
 @app.route('/api/category-property', methods=['GET'])
 def get_category_property():
     """카테고리별 대표 매물 가져오기"""
@@ -368,82 +891,6 @@ def get_category_property():
             "error": "Internal server error",
             "details": str(e)
         }), 500
-
-# 헬스 체크용 엔드포인트 (기존에 있다면 생략)
-@app.route('/api/test-category-views')
-def test_category_views():
-    """카테고리 뷰들을 테스트하는 엔드포인트 (개발/디버깅용)"""
-    try:
-        view_ids = [
-            'viwzEVzrr47fCbDNU',  # 재건축용 토지
-            'viwxS4dKAcQWmB0Be',  # 고수익률 건물
-            'viwUKnawSP8SkV9Sx'   # 저가단독주택
-        ]
-        
-        categories = [
-            '재건축용 토지',
-            '고수익률 건물', 
-            '저가단독주택'
-        ]
-        
-        results = {}
-        
-        airtable_key = os.environ.get("AIRTABLE_API_KEY")
-        if not airtable_key:
-            return jsonify({"error": "Airtable API key not set"}), 500
-            
-        headers = {"Authorization": f"Bearer {airtable_key}"}
-        base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73")
-        table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
-        
-        for i, view_id in enumerate(view_ids):
-            try:
-                url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
-                params = {
-                    'view': view_id,
-                    'maxRecords': 5  # 테스트용으로 5개만
-                }
-                
-                response = requests.get(url, headers=headers, params=params)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    records = data.get('records', [])
-                    
-                    # 대표 필드가 있는 레코드 찾기
-                    representative_records = [
-                        r for r in records 
-                        if r.get('fields', {}).get('대표') == True
-                    ]
-                    
-                    results[categories[i]] = {
-                        'view_id': view_id,
-                        'total_records': len(records),
-                        'representative_records': len(representative_records),
-                        'status': 'success',
-                        'sample_fields': list(records[0].get('fields', {}).keys()) if records else []
-                    }
-                    
-                    if representative_records:
-                        results[categories[i]]['sample_address'] = representative_records[0].get('fields', {}).get('지번 주소', 'Unknown')
-                else:
-                    results[categories[i]] = {
-                        'view_id': view_id,
-                        'status': 'error',
-                        'error': response.text
-                    }
-                    
-            except Exception as e:
-                results[categories[i]] = {
-                    'view_id': view_id,
-                    'status': 'exception',
-                    'error': str(e)
-                }
-        
-        return jsonify(results), 200
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/property-list', methods=['GET'])
 def get_property_list():
@@ -1468,495 +1915,6 @@ def send_consultation_email(customer_data):
         import traceback
         logger.error(f"오류 상세: {traceback.format_exc()}")
         return False
-
-class GoogleMessagesAutomation:
-    def __init__(self):
-        self.driver = None
-        self.is_logged_in = False
-        self.last_check_time = datetime.now()
-        
-    def setup_browser(self):
-        """Chrome 브라우저 설정 및 시작"""
-        try:
-            options = uc.ChromeOptions()
-            
-            # 헤드리스 모드 설정 (.env에서 읽기)
-            headless_mode = os.environ.get("HEADLESS_MODE", "false").lower() == "true"
-            if headless_mode:
-                options.add_argument('--headless')
-                logger.info("헤드리스 모드로 브라우저 시작")
-            
-            # 브라우저 옵션 설정
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-gpu')
-            options.add_argument('--window-size=1920,1080')
-            options.add_argument('--disable-blink-features=AutomationControlled')
-            
-            # 사용자 데이터 디렉토리 (로그인 상태 유지용)
-            user_data_dir = os.environ.get("CHROME_USER_DATA_DIR", "/home/sftpuser/chrome-user-data")
-            options.add_argument(f'--user-data-dir={user_data_dir}')
-            logger.info(f"Chrome 사용자 데이터 디렉토리: {user_data_dir}")
-            
-            # 알림 비활성화
-            prefs = {
-                "profile.default_content_setting_values.notifications": 2
-            }
-            options.add_experimental_option("prefs", prefs)
-            
-            self.driver = uc.Chrome(options=options)
-            logger.info("Chrome 브라우저가 시작되었습니다.")
-            return True
-            
-        except Exception as e:
-            logger.error(f"브라우저 설정 실패: {str(e)}")
-            return False
-    
-    def login_to_google_messages(self):
-        """구글 메시지 웹에 로그인"""
-        try:
-            if not self.driver:
-                if not self.setup_browser():
-                    return False
-            
-            logger.info("구글 메시지 웹에 접속 중...")
-            # 구글 메시지 웹 접속
-            self.driver.get('https://messages.google.com/web')
-            
-            # 페이지 로딩 대기
-            time.sleep(3)
-            
-            # QR 코드 스캔 대기 또는 이미 로그인된 상태 확인
-            wait = WebDriverWait(self.driver, 30)  # 30초 대기
-            
-            try:
-                # 이미 로그인된 경우 새 대화 버튼이 있는지 확인
-                logger.info("로그인 상태 확인 중...")
-                
-                # 여러 가능한 선택자로 시도
-                selectors_to_try = [
-                    '[data-e2e-start-chat]',
-                    '[aria-label="Start chat"]',
-                    'button[aria-label="새 대화"]',
-                    'button[data-e2e="start_chat"]',
-                    '.start-chat-button',
-                    'mw-fab-wrapper button'
-                ]
-                
-                start_chat_button = None
-                for selector in selectors_to_try:
-                    try:
-                        start_chat_button = wait.until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-                        )
-                        logger.info(f"새 대화 버튼을 찾았습니다: {selector}")
-                        break
-                    except TimeoutException:
-                        continue
-                
-                if start_chat_button:
-                    self.is_logged_in = True
-                    logger.info("✅ 구글 메시지에 이미 로그인되어 있습니다.")
-                    return True
-                
-            except TimeoutException:
-                pass
-            
-            # QR 코드가 있는지 확인
-            try:
-                qr_code = self.driver.find_element(By.CSS_SELECTOR, 'canvas, img[alt*="QR"], .qr-code')
-                if qr_code:
-                    logger.info("❌ QR 코드가 감지되었습니다. 다시 스캔해주세요.")
-                    return False
-            except:
-                pass
-            
-            logger.error("❌ 로그인 상태를 확인할 수 없습니다.")
-            return False
-                    
-        except Exception as e:
-            logger.error(f"구글 메시지 로그인 실패: {str(e)}")
-            return False
-    
-    def send_message(self, phone_number, message):
-        """메시지 전송"""
-        try:
-            if not self.is_logged_in:
-                logger.info("로그인되지 않음. 다시 로그인 시도...")
-                if not self.login_to_google_messages():
-                    return False
-            
-            logger.info(f"메시지 전송 시작: {phone_number}")
-            wait = WebDriverWait(self.driver, 30)
-            
-            # 새 대화 시작 버튼 찾기 및 클릭
-            selectors_to_try = [
-                '[data-e2e-start-chat]',
-                '[aria-label="Start chat"]',
-                'button[aria-label="새 대화"]',
-                'mw-fab-wrapper button'
-            ]
-            
-            start_chat = None
-            for selector in selectors_to_try:
-                try:
-                    start_chat = wait.until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-                    )
-                    logger.info(f"새 대화 버튼 클릭: {selector}")
-                    start_chat.click()
-                    break
-                except TimeoutException:
-                    continue
-            
-            if not start_chat:
-                logger.error("새 대화 버튼을 찾을 수 없습니다.")
-                return False
-            
-            time.sleep(2)
-            
-            # 전화번호 입력 필드 찾기 및 입력
-            phone_selectors = [
-                'input[type="tel"]',
-                'input[placeholder*="phone"]',
-                'input[placeholder*="전화"]',
-                'input[placeholder*="Phone"]',
-                'input[data-e2e="phone-input"]'
-            ]
-            
-            phone_input = None
-            for selector in phone_selectors:
-                try:
-                    phone_input = wait.until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                    )
-                    logger.info(f"전화번호 입력 필드 찾음: {selector}")
-                    break
-                except TimeoutException:
-                    continue
-            
-            if not phone_input:
-                logger.error("전화번호 입력 필드를 찾을 수 없습니다.")
-                return False
-                
-            phone_input.clear()
-            phone_input.send_keys(phone_number)
-            logger.info(f"전화번호 입력 완료: {phone_number}")
-            
-            # 잠시 대기 (자동완성 등을 위해)
-            time.sleep(3)
-            
-            # 메시지 입력 필드 찾기
-            message_selectors = [
-                'div[contenteditable="true"]',
-                'textarea[placeholder*="메시지"]',
-                'textarea[placeholder*="Message"]',
-                'div[data-e2e="message-input"]'
-            ]
-            
-            message_input = None
-            for selector in message_selectors:
-                try:
-                    message_input = wait.until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                    )
-                    logger.info(f"메시지 입력 필드 찾음: {selector}")
-                    break
-                except TimeoutException:
-                    continue
-            
-            if not message_input:
-                logger.error("메시지 입력 필드를 찾을 수 없습니다.")
-                return False
-                
-            message_input.clear()
-            message_input.send_keys(message)
-            logger.info("메시지 입력 완료")
-            
-            time.sleep(2)
-            
-            # 전송 버튼 클릭
-            send_selectors = [
-                '[data-e2e-send-message]',
-                '[aria-label="Send"]',
-                'button[type="submit"]',
-                'button[aria-label="보내기"]',
-                'button[data-e2e="send-button"]'
-            ]
-            
-            send_button = None
-            for selector in send_selectors:
-                try:
-                    send_button = wait.until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
-                    )
-                    logger.info(f"전송 버튼 찾음: {selector}")
-                    send_button.click()
-                    break
-                except TimeoutException:
-                    continue
-            
-            if not send_button:
-                logger.error("전송 버튼을 찾을 수 없습니다.")
-                return False
-            
-            logger.info(f"✅ 메시지 전송 완료: {phone_number}")
-            time.sleep(3)  # 전송 후 잠시 대기
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ 메시지 전송 실패 ({phone_number}): {str(e)}")
-            return False
-    
-    def close_browser(self):
-        """브라우저 종료"""
-        try:
-            if self.driver:
-                self.driver.quit()
-                self.driver = None
-                self.is_logged_in = False
-                logger.info("브라우저가 종료되었습니다.")
-        except Exception as e:
-            logger.error(f"브라우저 종료 실패: {str(e)}")
-
-# 글로벌 인스턴스
-google_messages = GoogleMessagesAutomation()
-
-def create_sms_template(property_type, customer_message):
-    """SMS 메시지 템플릿 생성"""
-    # 매물 종류 매핑
-    property_type_map = {
-        'house': '단독/다가구',
-        'mixed': '상가주택', 
-        'commercial': '상업용건물',
-        'land': '재건축/토지',
-        'sell': '매물접수'
-    }
-    
-    property_type_korean = property_type_map.get(property_type, property_type)
-    
-    template = f"""안녕하세요! 금토끼부동산입니다.
-
-{property_type_korean} 관련 문의 주셔서 감사합니다.
-
-고객님 문의내용:
-{customer_message[:80]}{'...' if len(customer_message) > 80 else ''}
-
-빠른 시일 내에 상세한 매물 정보를 안내해드리겠습니다.
-
-추가 문의: 02-3471-7377
-📱 010-4019-6509
-
-금토끼부동산 드림"""
-    
-    return template
-
-def monitor_airtable_for_new_contacts():
-    """에어테이블 모니터링 함수 (1분마다 실행)"""
-    global monitoring_active
-    logger.info("📡 에어테이블 모니터링을 시작합니다.")
-    
-    # 에어테이블 설정
-    airtable_key = os.environ.get("AIRTABLE_INQUIRY_KEY")
-    base_id = os.environ.get("AIRTABLE_INQUIRY_BASE_ID")
-    table_id = os.environ.get("AIRTABLE_INQUIRY_TABLE_ID")
-    
-    if not all([airtable_key, base_id, table_id]):
-        logger.error("❌ 에어테이블 설정이 완료되지 않았습니다.")
-        return
-    
-    headers = {
-        "Authorization": f"Bearer {airtable_key}",
-        "Content-Type": "application/json"
-    }
-    
-    monitoring_interval = int(os.environ.get("MONITORING_INTERVAL", "60"))
-    
-    while monitoring_active:
-        try:
-            logger.info("🔍 새로운 상담 문의 확인 중...")
-            
-            # 전송되지 않은 레코드 조회
-            url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
-            params = {
-                'filterByFormula': 'AND({연락처} != "", OR({SMS전송여부} = "", {SMS전송여부} = "대기"))',
-                'maxRecords': 5,
-                'sort[0][field]': '생성일시',
-                'sort[0][direction]': 'desc'
-            }
-            
-            response = requests.get(url, headers=headers, params=params)
-            
-            if response.status_code == 200:
-                data = response.json()
-                records = data.get('records', [])
-                
-                if len(records) > 0:
-                    logger.info(f"📧 새로운 레코드 {len(records)}개 발견")
-                else:
-                    logger.info("새로운 문의가 없습니다.")
-                
-                for record in records:
-                    fields = record.get('fields', {})
-                    record_id = record.get('id')
-                    
-                    phone_number = fields.get('연락처', '').strip()
-                    property_type = fields.get('매물종류', '')
-                    message_content = fields.get('문의사항', '')
-                    
-                    if not phone_number:
-                        logger.warning(f"연락처가 없는 레코드 건너뜀: {record_id}")
-                        continue
-                    
-                    logger.info(f"📱 SMS 전송 준비: {phone_number} ({property_type})")
-                    
-                    # SMS 메시지 템플릿 생성
-                    sms_message = create_sms_template(property_type, message_content)
-                    
-                    # 메시지 전송
-                    with browser_lock:
-                        success = google_messages.send_message(phone_number, sms_message)
-                    
-                    # 에어테이블 레코드 업데이트
-                    update_url = f"https://api.airtable.com/v0/{base_id}/{table_id}/{record_id}"
-                    
-                    if success:
-                        update_data = {
-                            "fields": {
-                                "SMS전송여부": "완료",
-                                "SMS전송일시": datetime.now().isoformat()
-                            }
-                        }
-                        logger.info(f"✅ SMS 전송 성공: {phone_number}")
-                    else:
-                        update_data = {
-                            "fields": {
-                                "SMS전송여부": "실패",
-                                "SMS전송일시": datetime.now().isoformat()
-                            }
-                        }
-                        logger.error(f"❌ SMS 전송 실패: {phone_number}")
-                    
-                    update_response = requests.patch(update_url, json=update_data, headers=headers)
-                    
-                    if update_response.status_code == 200:
-                        logger.info(f"에어테이블 업데이트 완료: {record_id}")
-                    else:
-                        logger.error(f"에어테이블 업데이트 실패: {update_response.text}")
-                    
-                    # 연속 전송 간격 (스팸 방지)
-                    time.sleep(5)
-            
-            else:
-                logger.error(f"에어테이블 조회 실패: {response.text}")
-        
-        except Exception as e:
-            logger.error(f"모니터링 오류: {str(e)}")
-        
-        # 대기
-        logger.info(f"💤 {monitoring_interval}초 대기 중...")
-        time.sleep(monitoring_interval)
-    
-    logger.info("📡 모니터링이 중지되었습니다.")
-
-# Flask 앱에 추가할 엔드포인트들 (기존 엔드포인트들 뒤에 추가)
-
-@app.route('/api/sms/start-monitoring', methods=['POST'])
-def start_sms_monitoring():
-    """SMS 모니터링 시작"""
-    global monitoring_thread, monitoring_active
-    
-    try:
-        if monitoring_active:
-            return jsonify({"status": "info", "message": "SMS monitoring is already running"}), 200
-        
-        logger.info("🚀 SMS 모니터링 시작 요청")
-        
-        # 브라우저 초기화 및 로그인
-        with browser_lock:
-            if google_messages.login_to_google_messages():
-                # 백그라운드 모니터링 스레드 시작
-                monitoring_active = True
-                monitoring_thread = threading.Thread(target=monitor_airtable_for_new_contacts, daemon=True)
-                monitoring_thread.start()
-                
-                logger.info("✅ SMS 모니터링이 시작되었습니다.")
-                return jsonify({"status": "success", "message": "SMS monitoring started successfully"}), 200
-            else:
-                return jsonify({"status": "error", "message": "Google Messages login failed. Please check QR code scan."}), 500
-                
-    except Exception as e:
-        logger.error(f"SMS 모니터링 시작 실패: {str(e)}")
-        return jsonify({"status": "error", "message": f"Failed to start monitoring: {str(e)}"}), 500
-
-@app.route('/api/sms/stop-monitoring', methods=['POST'])
-def stop_sms_monitoring():
-    """SMS 모니터링 중지"""
-    global monitoring_active
-    
-    try:
-        monitoring_active = False
-        logger.info("🛑 SMS 모니터링이 중지되었습니다.")
-        return jsonify({"status": "success", "message": "SMS monitoring stopped"}), 200
-        
-    except Exception as e:
-        logger.error(f"SMS 모니터링 중지 실패: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/api/sms/send-test', methods=['POST'])
-def send_test_sms():
-    """테스트 SMS 전송"""
-    try:
-        data = request.json
-        phone_number = data.get('phone_number')
-        message = data.get('message', '테스트 메시지입니다.')
-        
-        if not phone_number:
-            return jsonify({"status": "error", "message": "Phone number required"}), 400
-        
-        logger.info(f"🧪 테스트 SMS 전송: {phone_number}")
-        
-        with browser_lock:
-            success = google_messages.send_message(phone_number, message)
-        
-        if success:
-            return jsonify({"status": "success", "message": "Test SMS sent successfully"}), 200
-        else:
-            return jsonify({"status": "error", "message": "Failed to send test SMS"}), 500
-            
-    except Exception as e:
-        logger.error(f"테스트 SMS 전송 실패: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@app.route('/api/sms/status', methods=['GET'])
-def get_sms_status():
-    """SMS 시스템 상태 확인"""
-    global monitoring_active
-    
-    try:
-        status = {
-            "browser_active": google_messages.driver is not None,
-            "logged_in": google_messages.is_logged_in,
-            "monitoring_active": monitoring_active,
-            "last_check": google_messages.last_check_time.isoformat() if google_messages.last_check_time else None
-        }
-        return jsonify(status), 200
-        
-    except Exception as e:
-        logger.error(f"SMS 상태 확인 실패: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# 애플리케이션 종료 시 브라우저 정리
-import atexit
-
-def cleanup_browser():
-    """애플리케이션 종료 시 브라우저 정리"""
-    global monitoring_active
-    monitoring_active = False
-    with browser_lock:
-        google_messages.close_browser()
-
-atexit.register(cleanup_browser)
 
 @app.route('/api/blog-feed')
 def blog_feed():
