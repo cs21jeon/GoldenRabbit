@@ -742,7 +742,7 @@ def search_map_backup():
             
             # 내부 상세 페이지 링크 사용
             detail_url = f"/property-detail.html?id={record_id}"
-            popup_html += f'<a href="{detail_url}" target="_blank" style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">상세내역보기</a>'
+            popup_html += f'<a href="javascript:void(0);" onclick="parent.openPropertyDetail(\'{record_id}\')" style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none; cursor: pointer;">상세내역보기</a>'
             popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">이 매물 문의하기</a>'
             popup_html += "</div>"
             
@@ -1230,7 +1230,7 @@ def search_map():
             
             # 에어테이블 링크
             detail_url = f"/property-detail.html?id={record_id}"
-            popup_html += f'<a href="{detail_url}" style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">상세내역보기</a>'
+            popup_html += f'<a href="javascript:void(0);" onclick="parent.openPropertyDetail(\'{record_id}\')">상세내역보기</a>'
             popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">이 매물 문의하기</a>'
             popup_html += "</div>"
             
