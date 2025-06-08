@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify, make_response, send_from_directory
 import requests
 import os
 import re
@@ -37,6 +37,10 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)  # CORS 지원 추가
 vworld_key = os.environ.get("VWORLD_APIKEY")
+
+# Flask 서버에 정적 파일 경로 추가
+app.static_folder = 'static'
+app.static_url_path = '/static'
 
 # 로깅 설정
 logging.basicConfig(level=logging.DEBUG)
@@ -795,6 +799,43 @@ def search_map_backup():
         logger.error(traceback.format_exc())
         # 오류 발생 시 기존 API로 폴백
         return search_map()
+
+@app.route('/api/check-image')
+def check_image():
+    """특정 레코드의 이미지 존재 여부 확인"""
+    record_id = request.args.get('record_id')
+    if not record_id:
+        return jsonify({"error": "Record ID is required"}), 400
+    
+    # 최신 백업 디렉토리
+    latest_backup_dir = os.path.join(BACKUP_DIR, 'latest')
+    image_dir = os.path.join(latest_backup_dir, 'images', record_id)
+    
+    # 디렉토리 존재 확인
+    if not os.path.exists(image_dir):
+        return jsonify({"hasImage": False}), 200
+    
+    # 이미지 파일 찾기
+    image_files = [f for f in os.listdir(image_dir) 
+                  if os.path.isfile(os.path.join(image_dir, f)) and 
+                  f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
+    
+    if not image_files:
+        return jsonify({"hasImage": False}), 200
+    
+    # 첫 번째 이미지 반환
+    return jsonify({
+        "hasImage": True,
+        "filename": image_files[0],
+        "allImages": image_files
+    }), 200
+
+# 백업 이미지 디렉토리를 정적 파일로 제공
+@app.route('/airtable_backup/images/<path:path>')
+def serve_backup_images(path):
+    """백업 이미지 제공"""
+    image_dir = os.path.join(BACKUP_DIR, 'latest', 'images')
+    return send_from_directory(image_dir, path)
 
 @app.route('/api/category-property', methods=['GET'])
 def get_category_property():
