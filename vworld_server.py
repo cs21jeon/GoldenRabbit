@@ -455,6 +455,7 @@ def get_property_detail_backup():
         file_path = os.path.join(LATEST_BACKUP_DIR, 'all_properties.json')
         
         if not os.path.exists(file_path):
+            logger.error(f"백업 파일을 찾을 수 없음: {file_path}")
             return jsonify({"error": "Backup file not found"}), 404
         
         # 파일에서 데이터 로드
@@ -469,6 +470,7 @@ def get_property_detail_backup():
                 break
         
         if not property_data:
+            logger.warning(f"매물을 찾을 수 없음: {property_id}")
             return jsonify({"error": "Property not found"}), 404
         
         # 성공 응답
@@ -1227,8 +1229,8 @@ def search_map():
                 popup_html += f'<div style="color: #444;">용도: {fields["주용도"]}</div>'
             
             # 에어테이블 링크
-            airtable_url = f"https://airtable.com/{base_id}/{table_id}/viwyV15T4ihMpbDbr/{record_id}?blocks=hide"
-            popup_html += f'<a href="{airtable_url}" target="_blank" style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">상세내역보기</a>'
+            detail_url = f"/property-detail.html?id={record_id}"
+            popup_html += f'<a href="{detail_url}" style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">상세내역보기</a>'
             popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">이 매물 문의하기</a>'
             popup_html += "</div>"
             
