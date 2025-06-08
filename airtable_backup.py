@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 import json
 import time
 import requests
@@ -6,6 +7,9 @@ import logging
 import traceback
 from datetime import datetime
 import schedule
+
+dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(dotenv_path)
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, 
