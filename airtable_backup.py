@@ -183,8 +183,8 @@ def cleanup_old_backups(days_to_keep):
     except Exception as e:
         logger.error(f"백업 정리 중 오류 발생: {str(e)}")
 
+"""
 def run_scheduler():
-    """스케줄러 실행"""
     schedule.every().day.at("03:00").do(backup_airtable_data)
     
     logger.info("스케줄러 시작됨 - 매일 03:00에 백업 실행")
@@ -192,10 +192,12 @@ def run_scheduler():
     while True:
         schedule.run_pending()
         time.sleep(60)  # 1분마다 스케줄 확인
-
+"""
+        
 if __name__ == "__main__":
     # 시작 시 즉시 한 번 백업 실행
     backup_airtable_data()
-    
+"""    
     # 스케줄러 실행
     run_scheduler()
+"""
