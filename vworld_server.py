@@ -46,8 +46,10 @@ app.static_folder = 'static'
 app.static_url_path = '/static'
 
 # 로깅 설정
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, 
+                   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                   filename='/home/sftpuser/logs/api_debug.log')
+logger = logging.getLogger('image_api')
 
 # 블로그 캐시 저장 변수
 blog_cache = {
@@ -1340,43 +1342,134 @@ def check_image():
     """레코드 ID에 해당하는 이미지가 존재하는지 확인하는 API"""
     record_id = request.args.get('record_id')
     
+    logger.info(f"이미지 확인 요청 - 레코드 ID: {record_id}")
+    
     if not record_id:
+        logger.warning("레코드 ID가 제공되지 않음")
         return jsonify({'error': 'Record ID is required'}), 400
     
-    # 최신 백업 이미지 경로
-    image_dir = os.path.join(BACKUP_DIR, 'latest', 'images', record_id)
+    # 날짜별 백업 폴더 목록 가져오기 (최신순)
+    date_dirs = sorted(glob.glob(os.path.join(BACKUP_DIR, '????-??-??')), reverse=True)
     
-    # 이미지 디렉토리가 존재하는지 확인
-    if not os.path.exists(image_dir):
-        # 일별 백업 폴더에서 확인 (최신부터 역순으로)
-        backup_dirs = sorted(glob.glob(os.path.join(BACKUP_DIR, '????-??-??')), reverse=True)
+    # 검색할 경로 목록 (최신 날짜 폴더부터)
+    search_paths = []
+    
+    # 1. 날짜별 백업 폴더에서 검색
+    for date_dir in date_dirs:
+        date_basename = os.path.basename(date_dir)
+        search_paths.append({
+            'dir': os.path.join(date_dir, 'images', record_id),
+            'path_prefix': f'{date_basename}/images/{record_id}'
+        })
+    
+    # 2. latest 폴더도 검색 대상에 추가
+    latest_dir = os.path.join(BACKUP_DIR, 'latest')
+    if os.path.exists(latest_dir):
+        search_paths.append({
+            'dir': os.path.join(latest_dir, 'images', record_id),
+            'path_prefix': f'latest/images/{record_id}'
+        })
+    
+    logger.info(f"검색할 경로 수: {len(search_paths)}")
+    
+    # 각 경로에서 이미지 파일 찾기
+    for path_info in search_paths:
+        image_dir = path_info['dir']
+        path_prefix = path_info['path_prefix']
         
-        for backup_dir in backup_dirs:
-            alt_image_dir = os.path.join(backup_dir, 'images', record_id)
-            if os.path.exists(alt_image_dir):
-                image_dir = alt_image_dir
-                break
-        else:
-            # 모든 백업 폴더를 확인해도 이미지가 없는 경우
-            return jsonify({'hasImage': False}), 200
+        logger.info(f"이미지 검색 경로: {image_dir}")
+        
+        if os.path.exists(image_dir):
+            try:
+                # 이미지 파일 목록 가져오기
+                image_files = [f for f in os.listdir(image_dir) 
+                              if os.path.isfile(os.path.join(image_dir, f)) and 
+                              f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
+                
+                logger.info(f"경로에서 찾은 이미지 파일 수: {len(image_files)}")
+                
+                if image_files:
+                    # 첫 번째 이미지 파일 선택
+                    first_image = image_files[0]
+                    relative_path = f"{path_prefix}/{first_image}"
+                    
+                    logger.info(f"이미지 찾음: {relative_path}")
+                    
+                    return jsonify({
+                        'hasImage': True,
+                        'filename': first_image,
+                        'path': relative_path
+                    }), 200
+            except Exception as e:
+                logger.error(f"이미지 검색 중 오류: {str(e)}")
+                continue
     
-    # 이미지 파일 목록 가져오기
-    image_files = [f for f in os.listdir(image_dir) 
-                  if os.path.isfile(os.path.join(image_dir, f)) and 
-                  f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
-    
-    if not image_files:
-        return jsonify({'hasImage': False}), 200
-    
-    # 첫 번째 이미지 파일 반환
-    first_image = image_files[0]
-    relative_path = os.path.join('images', record_id, first_image).replace('\\', '/')
-    
-    return jsonify({
-        'hasImage': True,
-        'filename': first_image,
-        'path': relative_path
-    }), 200
+    # 이미지를 찾지 못한 경우
+    logger.warning(f"레코드 ID에 해당하는 이미지를 찾지 못함: {record_id}")
+    return jsonify({'hasImage': False}), 200
+
+# 백엔드 API 추가 - 매물 상세 정보
+@api_blueprint.route('/property-detail-backup', methods=['GET'])
+def property_detail_backup():
+    """레코드 ID로 매물 상세 정보를 조회하는 API"""
+    try:
+        record_id = request.args.get('id')
+        logger.info(f"매물 상세 조회 요청 - ID: {record_id}")
+        
+        if not record_id:
+            logger.warning("매물 ID가 제공되지 않음")
+            return jsonify({'error': 'Record ID is required'}), 400
+        
+        # 최신 백업 데이터 경로
+        latest_backup_path = os.path.join(BACKUP_DIR, 'latest', 'all_properties.json')
+        
+        # latest 폴더가 없거나 파일이 없는 경우 최신 날짜 폴더 검색
+        if not os.path.exists(latest_backup_path):
+            date_dirs = sorted(glob.glob(os.path.join(BACKUP_DIR, '????-??-??')), reverse=True)
+            if date_dirs:
+                latest_date_dir = date_dirs[0]
+                latest_backup_path = os.path.join(latest_date_dir, 'all_properties.json')
+                logger.info(f"latest 경로가 없어 최신 날짜 폴더 사용: {latest_backup_path}")
+        
+        # 파일 존재 확인
+        if not os.path.exists(latest_backup_path):
+            logger.error(f"백업 파일이 존재하지 않음: {latest_backup_path}")
+            return jsonify({'error': f'Backup file not found'}), 404
+        
+        # 백업 데이터 로드
+        import json
+        try:
+            with open(latest_backup_path, 'r', encoding='utf-8') as f:
+                logger.info(f"백업 파일 로드 시작: {latest_backup_path}")
+                all_properties = json.load(f)
+                logger.info(f"백업 파일 로드 완료: {len(all_properties)} 레코드")
+        except Exception as e:
+            logger.error(f"백업 파일 로드 실패: {str(e)}")
+            return jsonify({'error': f'Failed to load backup data: {str(e)}'}), 500
+        
+        # 요청된 ID의 매물 찾기
+        property_data = next((p for p in all_properties if p.get('id') == record_id), None)
+        
+        if not property_data:
+            logger.warning(f"요청된 ID의 매물을 찾을 수 없음: {record_id}")
+            return jsonify({'error': f'Property with ID {record_id} not found'}), 404
+        
+        logger.info(f"매물 데이터 찾음: {record_id}")
+        
+        # 응답 데이터 구성
+        response_data = {'property': property_data}
+        
+        # 로깅을 위한 응답 미리보기 (첫 100자)
+        preview = json.dumps(response_data, ensure_ascii=False)[:100] + "..."
+        logger.info(f"응답 데이터 미리보기: {preview}")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logger.error(f"매물 상세 조회 중 오류 발생: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
 # AI 물건 검색 기능 추가
 @app.route('/api/property-search', methods=['POST'])
