@@ -27,7 +27,7 @@ from email import encoders
 VERSION_FILE_PATH = '/home/sftpuser/www/version.json'
 
 # 백업 데이터 관련 경로 설정
-BACKUP_DIR = '/home/sftpuser/airtable_backup'
+BACKUP_DIR = '/home/sftpuser/www/airtable_backup'
 LATEST_BACKUP_DIR = os.path.join(BACKUP_DIR, 'latest')
 
 # 환경 변수 로드

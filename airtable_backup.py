@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger('airtable_backup')
 
 # 백업 디렉토리 설정
-BACKUP_DIR = '/home/sftpuser/airtable_backup'
+BACKUP_DIR = '/home/sftpuser/www/airtable_backup'
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
 # 에어테이블 설정
