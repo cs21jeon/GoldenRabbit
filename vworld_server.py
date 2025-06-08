@@ -1,8 +1,9 @@
-from flask import Flask, request, jsonify, make_response, send_from_directory
+from flask import Flask, request, jsonify, make_response, send_from_directory, Blueprint
 import requests
 import os
 import re
 import json
+import glob
 import asyncio
 import threading
 import time
@@ -22,6 +23,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
+
+api_blueprint = Blueprint('api', __name__)
 
 # 버전 파일 경로 설정 - 절대 경로 사용
 VERSION_FILE_PATH = '/home/sftpuser/www/version.json'
@@ -1331,6 +1334,49 @@ def search_map():
         import traceback
         logger.error(traceback.format_exc())
         return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
+
+@api_blueprint.route('/check-image', methods=['GET'])
+def check_image():
+    """레코드 ID에 해당하는 이미지가 존재하는지 확인하는 API"""
+    record_id = request.args.get('record_id')
+    
+    if not record_id:
+        return jsonify({'error': 'Record ID is required'}), 400
+    
+    # 최신 백업 이미지 경로
+    image_dir = os.path.join(BACKUP_DIR, 'latest', 'images', record_id)
+    
+    # 이미지 디렉토리가 존재하는지 확인
+    if not os.path.exists(image_dir):
+        # 일별 백업 폴더에서 확인 (최신부터 역순으로)
+        backup_dirs = sorted(glob.glob(os.path.join(BACKUP_DIR, '????-??-??')), reverse=True)
+        
+        for backup_dir in backup_dirs:
+            alt_image_dir = os.path.join(backup_dir, 'images', record_id)
+            if os.path.exists(alt_image_dir):
+                image_dir = alt_image_dir
+                break
+        else:
+            # 모든 백업 폴더를 확인해도 이미지가 없는 경우
+            return jsonify({'hasImage': False}), 200
+    
+    # 이미지 파일 목록 가져오기
+    image_files = [f for f in os.listdir(image_dir) 
+                  if os.path.isfile(os.path.join(image_dir, f)) and 
+                  f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
+    
+    if not image_files:
+        return jsonify({'hasImage': False}), 200
+    
+    # 첫 번째 이미지 파일 반환
+    first_image = image_files[0]
+    relative_path = os.path.join('images', record_id, first_image).replace('\\', '/')
+    
+    return jsonify({
+        'hasImage': True,
+        'filename': first_image,
+        'path': relative_path
+    }), 200
 
 # AI 물건 검색 기능 추가
 @app.route('/api/property-search', methods=['POST'])
