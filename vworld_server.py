@@ -485,7 +485,7 @@ def get_property_detail_backup():
         logger.error(f"상세 오류: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/search-map-backup', methods=['POST'])@app.route('/api/search-map-backup', methods=['POST'])
+@app.route('/api/search-map-backup', methods=['POST'])
 def search_map_backup():
     """백업 데이터에서 검색 조건에 따른 동적 지도 생성"""
     try:
