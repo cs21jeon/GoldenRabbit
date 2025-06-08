@@ -1159,8 +1159,7 @@ def search_map():
         logger.info(f"  - Status filtered: {status_filtered_count}")
         logger.info(f"  - Condition filtered: {condition_filtered_count}")
         logger.info(f"  - Passed filter: {len(filtered_records)}")
-        
-        # 나머지 코드는 동일...
+
         # 지도 생성
         folium_map = folium.Map(location=[37.4834458778777, 126.970207234818], zoom_start=15)
         
@@ -1230,8 +1229,18 @@ def search_map():
             
             # 에어테이블 링크
             detail_url = f"/property-detail.html?id={record_id}"
-            popup_html += f'<a href="javascript:void(0);" onclick="parent.openPropertyDetail(\'{record_id}\')">상세내역보기</a>'
-            popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">이 매물 문의하기</a>'
+            popup_html += f'''
+            <a href="javascript:void(0);" 
+                onclick="window.parent.postMessage({{action: 'openPropertyDetail', recordId: '{record_id}'}}, '*')"
+                style="display: block; margin-top: 10px; padding: 5px; background-color: #f5f5f5; text-align: center; color: #e38000; text-decoration: none;">
+                상세내역보기
+            </a>
+            <a href="javascript:void(0);" 
+                onclick="window.parent.postMessage({{action: 'openConsultModal', address: '{address}'}}, '*')"
+                style="display: block; margin-top: 5px; padding: 5px; background-color: #2962FF; color: white; text-align: center; text-decoration: none;">
+                이 매물 문의하기
+            </a>
+            '''
             popup_html += "</div>"
             
             # 가격 말풍선 아이콘
