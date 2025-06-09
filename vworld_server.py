@@ -835,7 +835,7 @@ def search_map():
 # ===== 이미지 관련 API =====
 @app.route('/api/check-image')
 def check_image():
-    """특정 레코드의 이미지 존재 여부 확인"""
+    """특정 레코드의 이미지 존재 여부 확인 (우선순위 기반 선택)"""
     record_id = request.args.get('record_id')
     if not record_id:
         return jsonify({"error": "Record ID is required"}), 400
@@ -845,22 +845,118 @@ def check_image():
     
     # 디렉토리 존재 확인
     if not os.path.exists(image_dir):
-        return jsonify({"hasImage": False}), 200
+        return jsonify({"hasImage": False, "reason": "Directory not found"}), 200
     
-    # 이미지 파일 찾기
-    image_files = [f for f in os.listdir(image_dir) 
-                  if os.path.isfile(os.path.join(image_dir, f)) and 
-                  f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
+    try:
+        # 이미지 파일 찾기
+        image_files = []
+        for f in os.listdir(image_dir):
+            file_path = os.path.join(image_dir, f)
+            if (os.path.isfile(file_path) and 
+                f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')) and
+                os.path.getsize(file_path) > 0):  # 0바이트 파일 제외
+                image_files.append(f)
+        
+        if not image_files:
+            return jsonify({"hasImage": False, "reason": "No valid image files found"}), 200
+        
+        # 이미지 파일들을 우선순위에 따라 정렬
+        def get_image_priority(filename):
+            filename_lower = filename.lower()
+            
+            # 1순위: 원본 파일명 (날짜가 포함되거나 카카오톡 등)
+            if any(keyword in filename_lower for keyword in ['202', 'kakao', 'img_', 'dsc_']):
+                return (1, len(filename))  # 원본 파일명, 길이 순
+            
+            # 2순위: representative 파일
+            elif 'representative' in filename_lower:
+                return (2, len(filename))
+            
+            # 3순위: 기타 파일
+            elif not filename_lower.startswith('photo_'):
+                return (3, len(filename))
+            
+            # 4순위: photo_ 로 시작하는 생성된 파일명
+            else:
+                return (4, len(filename))
+        
+        # 우선순위에 따라 정렬 (1순위가 먼저, 같은 순위면 파일명 길이 순)
+        image_files.sort(key=get_image_priority)
+        
+        # 가장 우선순위 높은 이미지 선택
+        selected_image = image_files[0]
+        
+        # 파일 정보 확인
+        image_path = os.path.join(image_dir, selected_image)
+        file_size = os.path.getsize(image_path)
+        
+        logger.info(f"이미지 선택: {record_id} -> {selected_image} ({file_size} bytes, 우선순위: {get_image_priority(selected_image)[0]})")
+        
+        return jsonify({
+            "hasImage": True,
+            "filename": selected_image,
+            "fileSize": file_size,
+            "priority": get_image_priority(selected_image)[0],
+            "allImages": image_files,
+            "totalFiles": len(image_files)
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"이미지 확인 중 오류: {record_id} - {str(e)}")
+        return jsonify({
+            "hasImage": False, 
+            "error": str(e),
+            "reason": "Error occurred while checking images"
+        }), 500
+
+# 디버깅용 API도 업데이트
+@app.route('/api/debug/image-priority')
+def debug_image_priority():
+    """이미지 우선순위 확인 (디버깅용)"""
+    record_id = request.args.get('record_id')
+    if not record_id:
+        return jsonify({"error": "Record ID is required"}), 400
     
-    if not image_files:
-        return jsonify({"hasImage": False}), 200
+    image_dir = os.path.join(BACKUP_DIR, 'images', record_id)
     
-    # 첫 번째 이미지 반환
-    return jsonify({
-        "hasImage": True,
-        "filename": image_files[0],
-        "allImages": image_files
-    }), 200
+    if not os.path.exists(image_dir):
+        return jsonify({"exists": False, "directory": image_dir})
+    
+    try:
+        files_with_priority = []
+        for filename in os.listdir(image_dir):
+            file_path = os.path.join(image_dir, filename)
+            if os.path.isfile(file_path):
+                def get_image_priority(fname):
+                    fname_lower = fname.lower()
+                    if any(keyword in fname_lower for keyword in ['202', 'kakao', 'img_', 'dsc_']):
+                        return 1  # 원본 파일명
+                    elif 'representative' in fname_lower:
+                        return 2  # representative
+                    elif not fname_lower.startswith('photo_'):
+                        return 3  # 기타
+                    else:
+                        return 4  # photo_ 생성 파일
+                
+                files_with_priority.append({
+                    "filename": filename,
+                    "size": os.path.getsize(file_path),
+                    "priority": get_image_priority(filename),
+                    "is_image": filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp'))
+                })
+        
+        # 우선순위 순으로 정렬
+        files_with_priority.sort(key=lambda x: (x['priority'], -x['size']))
+        
+        return jsonify({
+            "exists": True,
+            "directory": image_dir,
+            "files": files_with_priority,
+            "recommended": files_with_priority[0] if files_with_priority else None
+        })
+        
+    except Exception as e:
+        return jsonify({"exists": True, "directory": image_dir, "error": str(e)})
 
 # 백업 이미지 디렉토리를 정적 파일로 제공
 @app.route('/airtable_backup/images/<path:path>')
