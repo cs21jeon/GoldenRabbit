@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO,
                     filename='/home/sftpuser/logs/airtable_backup.log')
 logger = logging.getLogger('airtable_backup')
 
-# 백업 디렉토리 설정
+# 백업 디렉토리 설정 - 단일 폴더 사용
 BACKUP_DIR = '/home/sftpuser/www/airtable_backup'
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
@@ -49,14 +49,76 @@ VIEWS = {
     }
 }
 
+def calculate_data_hash(data):
+    """데이터의 해시값을 계산하여 변경사항 감지"""
+    data_str = json.dumps(data, sort_keys=True, ensure_ascii=False)
+    return hashlib.md5(data_str.encode('utf-8')).hexdigest()
+
+def load_previous_data(filename):
+    """이전 백업 데이터 로드"""
+    file_path = os.path.join(BACKUP_DIR, filename)
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"이전 데이터 로드 실패 ({filename}): {e}")
+    return None
+
+def save_backup_data(data, filename):
+    """백업 데이터 저장"""
+    file_path = os.path.join(BACKUP_DIR, filename)
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    logger.info(f"데이터 저장 완료: {filename}")
+
+def compare_and_update_data(new_data, view_name, filename):
+    """데이터 비교 후 변경사항이 있을 때만 업데이트"""
+    previous_data = load_previous_data(filename)
+    
+    # 새 데이터 해시 계산
+    new_hash = calculate_data_hash(new_data)
+    
+    # 이전 데이터가 없으면 새로 저장
+    if previous_data is None:
+        logger.info(f"'{view_name}' - 이전 데이터 없음, 새로 저장")
+        save_backup_data(new_data, filename)
+        return True, len(new_data), 0, len(new_data)
+    
+    # 이전 데이터 해시 계산
+    previous_hash = calculate_data_hash(previous_data)
+    
+    # 데이터가 동일하면 업데이트 하지 않음
+    if new_hash == previous_hash:
+        logger.info(f"'{view_name}' - 데이터 변경사항 없음, 업데이트 건너뜀")
+        return False, len(new_data), 0, 0
+    
+    # 변경사항이 있으면 업데이트
+    logger.info(f"'{view_name}' - 데이터 변경 감지, 업데이트 진행")
+    
+    # 레코드별 변경사항 분석
+    previous_records = {record.get('id'): record for record in previous_data}
+    new_records = {record.get('id'): record for record in new_data}
+    
+    added_count = len(set(new_records.keys()) - set(previous_records.keys()))
+    removed_count = len(set(previous_records.keys()) - set(new_records.keys()))
+    
+    modified_count = 0
+    for record_id in set(new_records.keys()) & set(previous_records.keys()):
+        if calculate_data_hash(new_records[record_id]) != calculate_data_hash(previous_records[record_id]):
+            modified_count += 1
+    
+    logger.info(f"'{view_name}' 변경사항 - 추가: {added_count}, 삭제: {removed_count}, 수정: {modified_count}")
+    
+    # 새 데이터 저장
+    save_backup_data(new_data, filename)
+    
+    return True, len(new_data), added_count + removed_count + modified_count, len(new_data)
+
 def backup_airtable_data():
-    """에어테이블의 모든 뷰 데이터를 백업"""
+    """에어테이블의 모든 뷰 데이터를 백업 (변경사항만 업데이트)"""
     start_time = time.time()
     logger.info(f"====== 에어테이블 백업 시작: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ======")
-    
-    backup_date = datetime.now().strftime('%Y-%m-%d')
-    daily_backup_dir = os.path.join(BACKUP_DIR, backup_date)
-    os.makedirs(daily_backup_dir, exist_ok=True)
     
     if not AIRTABLE_KEY:
         logger.error("AIRTABLE_API_KEY가 설정되지 않았습니다.")
@@ -68,6 +130,8 @@ def backup_airtable_data():
     
     total_records = 0
     success_count = 0
+    total_changes = 0
+    updated_views = []
     all_records = []  # 모든 레코드 저장 (이미지 처리용)
     
     # 각 뷰별로 데이터 백업
@@ -79,7 +143,7 @@ def backup_airtable_data():
         
         try:
             # 모든 레코드 가져오기 (페이지네이션 처리)
-            view_records = []  # 각 뷰의 레코드를 저장할 변수
+            view_records = []
             offset = None
             page_count = 0
             
@@ -98,10 +162,11 @@ def backup_airtable_data():
                 
                 data = response.json()
                 records = data.get('records', [])
-                view_records.extend(records)  # 각 뷰의 레코드 수집
+                view_records.extend(records)
                 
-                # 전체 레코드 목록에도 추가 (이미지 처리용)
-                all_records.extend(records)
+                # 전체 레코드 목록에도 추가 (이미지 처리용, all 뷰에서만)
+                if view_name == 'all':
+                    all_records.extend(records)
                 
                 logger.info(f"  페이지 {page_count + 1}: {len(records)}개 레코드 로드")
                 page_count += 1
@@ -111,65 +176,60 @@ def backup_airtable_data():
                 if not offset:
                     break
             
-            # 백업 파일 저장
-            backup_path = os.path.join(daily_backup_dir, filename)
-            with open(backup_path, 'w', encoding='utf-8') as f:
-                json.dump(view_records, f, ensure_ascii=False, indent=2)
+            # 데이터 비교 및 업데이트
+            was_updated, record_count, changes, final_count = compare_and_update_data(
+                view_records, view_name, filename
+            )
             
-            # 최신 데이터를 가리키는 심볼릭 링크 생성/업데이트
-            latest_path = os.path.join(BACKUP_DIR, 'latest')
-            os.makedirs(latest_path, exist_ok=True)
-            latest_file_path = os.path.join(latest_path, filename)
+            if was_updated:
+                updated_views.append(view_name)
+                total_changes += changes
             
-            # 최신 파일 링크 대신 실제 복사
-            with open(latest_file_path, 'w', encoding='utf-8') as f:
-                json.dump(view_records, f, ensure_ascii=False, indent=2)
-            
-            logger.info(f"  '{view_name}' 뷰 백업 완료: {len(view_records)}개 레코드")
-            logger.info(f"  백업 파일: {backup_path}")
-            logger.info(f"  최신 파일: {latest_file_path}")
-            
-            total_records += len(view_records)
+            total_records += record_count
             success_count += 1
             
         except Exception as e:
             logger.error(f"'{view_name}' 뷰 백업 실패: {str(e)}")
             logger.error(traceback.format_exc())
     
-    # 이미지 백업 (전체 레코드에서 이미지 추출)
-    image_stats = backup_property_images(all_records, daily_backup_dir)
+    # 이미지 백업 (전체 레코드에서 이미지 추출, all 뷰가 업데이트된 경우에만)
+    image_stats = {"new_images": 0, "updated_images": 0, "skipped_images": 0, "total_processed": 0}
+    if 'all' in updated_views and all_records:
+        logger.info("이미지 백업 시작")
+        image_stats = backup_property_images(all_records)
+    else:
+        logger.info("데이터 변경사항이 없어 이미지 백업 건너뜀")
 
     # 백업 메타데이터 저장
     metadata = {
-        'backup_date': backup_date,
+        'last_backup_date': datetime.now().strftime('%Y-%m-%d'),
+        'last_backup_time': datetime.now().isoformat(),
         'total_records': total_records,
-        'views_backed_up': success_count,
+        'views_processed': success_count,
         'total_views': len(VIEWS),
-        'timestamp': datetime.now().isoformat(),
-        'image_stats': image_stats
+        'updated_views': updated_views,
+        'total_changes': total_changes,
+        'image_stats': image_stats,
+        'backup_type': 'incremental'
     }
     
-    metadata_path = os.path.join(daily_backup_dir, 'metadata.json')
+    metadata_path = os.path.join(BACKUP_DIR, 'metadata.json')
     with open(metadata_path, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, ensure_ascii=False, indent=2)
     
-    # 최신 메타데이터 업데이트
-    latest_metadata_path = os.path.join(BACKUP_DIR, 'latest', 'metadata.json')
-    with open(latest_metadata_path, 'w', encoding='utf-8') as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
-    
     elapsed_time = time.time() - start_time
-    logger.info(f"====== 에어테이블 백업 완료: 총 {total_records}개 레코드, {elapsed_time:.2f}초 소요 ======")
     
-    # 오래된 백업 정리 (옵션)
-    cleanup_old_backups(30)  # 30일 이상 된 백업 삭제
+    if updated_views:
+        logger.info(f"====== 백업 완료: {len(updated_views)}개 뷰 업데이트 ({', '.join(updated_views)}), 총 {total_changes}개 변경사항, {elapsed_time:.2f}초 소요 ======")
+    else:
+        logger.info(f"====== 백업 완료: 변경사항 없음, {elapsed_time:.2f}초 소요 ======")
     
     return success_count == len(VIEWS)
 
-def backup_property_images(records, backup_dir):
-    """매물 이미지를 백업하는 함수"""
+def backup_property_images(records):
+    """매물 이미지를 백업하는 함수 (변경사항만 업데이트)"""
     # 이미지 저장 디렉토리
-    image_dir = os.path.join(backup_dir, 'images')
+    image_dir = os.path.join(BACKUP_DIR, 'images')
     os.makedirs(image_dir, exist_ok=True)
     
     # 이미지 메타데이터 파일 경로
@@ -265,10 +325,10 @@ def backup_property_images(records, backup_dir):
                     
                     if prev_hash:
                         updated_images += 1
+                        logger.info(f"이미지 업데이트: {filename} ({img_type})")
                     else:
                         new_images += 1
-                    
-                    logger.info(f"이미지 저장 완료: {filename} ({img_type})")
+                        logger.info(f"새 이미지 저장: {filename} ({img_type})")
                 else:
                     logger.warning(f"이미지 다운로드 실패: {url}, 상태 코드: {response.status_code}")
             except Exception as e:
@@ -287,36 +347,45 @@ def backup_property_images(records, backup_dir):
         'total_processed': new_images + updated_images + skipped_images
     }
 
-def cleanup_old_backups(days_to_keep):
-    """오래된 백업 파일 정리"""
+def cleanup_old_backups():
+    """오래된 백업 폴더 정리 (날짜 형식 폴더들만)"""
     try:
         import shutil
-        from datetime import datetime, timedelta
+        from datetime import datetime
         
-        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
-        
+        removed_count = 0
         for folder_name in os.listdir(BACKUP_DIR):
-            # 'latest' 폴더와 메타데이터 파일은 건너뜀
-            if folder_name == 'latest' or not os.path.isdir(os.path.join(BACKUP_DIR, folder_name)):
-                continue
+            folder_path = os.path.join(BACKUP_DIR, folder_name)
             
-            try:
-                # 폴더명이 날짜 형식(YYYY-MM-DD)인지 확인
-                folder_date = datetime.strptime(folder_name, '%Y-%m-%d')
-                
-                # 기준일보다 오래된 경우 삭제
-                if folder_date < cutoff_date:
-                    folder_path = os.path.join(BACKUP_DIR, folder_name)
+            # 날짜 형식(YYYY-MM-DD) 폴더만 삭제 대상
+            if os.path.isdir(folder_path) and len(folder_name) == 10 and folder_name.count('-') == 2:
+                try:
+                    # 폴더명이 날짜 형식인지 확인
+                    datetime.strptime(folder_name, '%Y-%m-%d')
+                    # 날짜 형식이면 삭제
                     shutil.rmtree(folder_path)
-                    logger.info(f"오래된 백업 삭제: {folder_name}")
-            except ValueError:
-                # 날짜 형식이 아닌 폴더는 무시
-                continue
+                    logger.info(f"오래된 백업 폴더 삭제: {folder_name}")
+                    removed_count += 1
+                except ValueError:
+                    # 날짜 형식이 아닌 폴더는 무시
+                    continue
+                except Exception as e:
+                    logger.error(f"폴더 삭제 실패 {folder_name}: {e}")
+        
+        if removed_count > 0:
+            logger.info(f"총 {removed_count}개의 오래된 백업 폴더를 정리했습니다.")
+        else:
+            logger.info("정리할 오래된 백업 폴더가 없습니다.")
+            
     except Exception as e:
         logger.error(f"백업 정리 중 오류 발생: {str(e)}")
 
 """
 def run_scheduler():
+    # 처음 실행 시 오래된 백업 폴더 정리
+    cleanup_old_backups()
+    
+    # 매일 03:00에 백업 실행
     schedule.every().day.at("03:00").do(backup_airtable_data)
     
     logger.info("스케줄러 시작됨 - 매일 03:00에 백업 실행")
@@ -327,8 +396,12 @@ def run_scheduler():
 """
         
 if __name__ == "__main__":
-    # 시작 시 즉시 한 번 백업 실행
+    # 시작 시 오래된 백업 폴더 정리
+    cleanup_old_backups()
+    
+    # 백업 실행
     backup_airtable_data()
+    
 """    
     # 스케줄러 실행
     run_scheduler()
