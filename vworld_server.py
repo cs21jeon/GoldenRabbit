@@ -373,11 +373,13 @@ def get_category_property():
         if not representative_records and all_records:
             representative_records = [all_records[0]]
         
+        # 응답 구조를 명확하게 정의
         response_data = {
             "records": representative_records,
             "view_id": view_id,
             "total_count": len(representative_records),
-            "source": "backup"
+            "source": "backup",
+            "success": True  # 성공 여부 명시
         }
         
         logger.info(f"백업에서 카테고리 대표 매물 반환: {len(representative_records)}개")
@@ -388,7 +390,78 @@ def get_category_property():
         import traceback
         logger.error(f"상세 오류: {traceback.format_exc()}")
         # 오류 발생 시 에어테이블 API로 폴백
-        return get_category_property_from_airtable(view_id)
+        try:
+            return get_category_property_from_airtable(view_id)
+        except:
+            return jsonify({
+                "error": "Failed to load category property",
+                "message": str(e),
+                "success": False
+            }), 500
+
+@app.route('/api/debug/backup-files')
+def debug_backup_files():
+    """백업 파일 상태 확인 (디버깅용)"""
+    try:
+        files_info = {}
+        
+        # 백업 디렉토리 존재 확인
+        if not os.path.exists(BACKUP_DIR):
+            return jsonify({
+                "error": f"Backup directory does not exist: {BACKUP_DIR}",
+                "backup_dir": BACKUP_DIR
+            }), 404
+        
+        # 각 파일 확인
+        expected_files = [
+            'all_properties.json',
+            'reconstruction_properties.json', 
+            'high_yield_properties.json',
+            'low_cost_properties.json',
+            'metadata.json'
+        ]
+        
+        for filename in expected_files:
+            file_path = os.path.join(BACKUP_DIR, filename)
+            if os.path.exists(file_path):
+                stat = os.stat(file_path)
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    try:
+                        data = json.load(f)
+                        record_count = len(data) if isinstance(data, list) else "Not a list"
+                    except:
+                        record_count = "Invalid JSON"
+                        
+                files_info[filename] = {
+                    "exists": True,
+                    "size": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "record_count": record_count
+                }
+            else:
+                files_info[filename] = {"exists": False}
+        
+        # 이미지 디렉토리 확인
+        image_dir = os.path.join(BACKUP_DIR, 'images')
+        if os.path.exists(image_dir):
+            image_folders = [d for d in os.listdir(image_dir) if os.path.isdir(os.path.join(image_dir, d))]
+            files_info["images"] = {
+                "exists": True,
+                "folder_count": len(image_folders),
+                "sample_folders": image_folders[:5]  # 처음 5개만
+            }
+        else:
+            files_info["images"] = {"exists": False}
+            
+        return jsonify({
+            "backup_dir": BACKUP_DIR,
+            "files": files_info,
+            "total_files": len([f for f in files_info.values() if f.get("exists")])
+        })
+        
+    except Exception as e:
+        logger.error(f"백업 파일 확인 오류: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/category-properties')
 def get_category_properties():
@@ -452,6 +525,11 @@ def get_category_properties():
 @app.route('/api/property-detail')
 def get_property_detail():
     """백업된 데이터에서 특정 매물 상세 정보 가져오기"""
+    return get_property_detail_backup()  # 동일한 함수 호출로 통일
+
+@app.route('/api/property-detail-backup')
+def get_property_detail_backup():
+    """백업된 데이터에서 특정 매물 상세 정보 가져오기 (HTML 호환용)"""
     try:
         property_id = request.args.get('id')
         if not property_id:
@@ -995,6 +1073,31 @@ def property_search():
     except Exception as e:
         logger.error(f"AI property search error: {str(e)}")
         return jsonify({"error": f"Error processing request: {str(e)}"}), 500
+
+def setup_detailed_logging():
+    """상세한 로깅 설정"""
+    # 파일 핸들러
+    file_handler = logging.FileHandler('/home/sftpuser/logs/api_detailed.log')
+    file_handler.setLevel(logging.DEBUG)
+    
+    # 콘솔 핸들러
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    # 포맷터
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
+    )
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # 로거에 핸들러 추가
+    app.logger.addHandler(file_handler)
+    app.logger.addHandler(console_handler)
+    app.logger.setLevel(logging.DEBUG)
+
+# 애플리케이션 시작 시 로깅 설정
+setup_detailed_logging()
 
 # ===== 이메일 발송 함수 =====
 def send_consultation_email(customer_data):
