@@ -227,7 +227,7 @@ def backup_airtable_data():
     return success_count == len(VIEWS)
 
 def backup_property_images(records):
-    """매물 이미지를 백업하는 함수 (변경사항만 업데이트)"""
+    """매물 이미지를 백업하는 함수 (중복 제거 및 최적화 버전)"""
     # 이미지 저장 디렉토리
     image_dir = os.path.join(BACKUP_DIR, 'images')
     os.makedirs(image_dir, exist_ok=True)
@@ -247,57 +247,148 @@ def backup_property_images(records):
     new_images = 0
     updated_images = 0
     skipped_images = 0
+    error_images = 0
+    cleaned_duplicates = 0
+    
+    def get_image_priority(filename):
+        """이미지 파일 우선순위 결정"""
+        filename_lower = filename.lower()
+        
+        # 1순위: 원본 파일명 (날짜, 카카오톡 등)
+        if any(keyword in filename_lower for keyword in ['202', 'kakao', 'img_', 'dsc_', 'photo_202']):
+            return (1, len(filename))
+        
+        # 2순위: representative 파일
+        elif 'representative' in filename_lower:
+            return (2, len(filename))
+        
+        # 3순위: 의미있는 파일명
+        elif not filename_lower.startswith('photo_') or len(filename) > 15:
+            return (3, len(filename))
+        
+        # 4순위: photo_ 로 시작하는 생성된 파일명
+        else:
+            return (4, len(filename))
+    
+    def clean_existing_duplicates(record_image_dir, record_id):
+        """기존 중복 파일들 정리"""
+        if not os.path.exists(record_image_dir):
+            return None, 0
+        
+        # 기존 이미지 파일들 찾기
+        existing_files = []
+        for f in os.listdir(record_image_dir):
+            file_path = os.path.join(record_image_dir, f)
+            if (os.path.isfile(file_path) and 
+                f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')) and
+                os.path.getsize(file_path) > 1000):  # 1KB 이상만
+                existing_files.append({
+                    'filename': f,
+                    'path': file_path,
+                    'size': os.path.getsize(file_path),
+                    'priority': get_image_priority(f)
+                })
+        
+        if not existing_files:
+            return None, 0
+        
+        # 우선순위 순으로 정렬
+        existing_files.sort(key=lambda x: (x['priority'][0], -x['size']))
+        
+        # 가장 좋은 파일 선택
+        best_file = existing_files[0]
+        files_to_delete = existing_files[1:]  # 나머지는 삭제 대상
+        
+        deleted_count = 0
+        for file_info in files_to_delete:
+            try:
+                os.remove(file_info['path'])
+                logger.info(f"중복 파일 삭제: {record_id}/{file_info['filename']} (우선순위: {file_info['priority'][0]})")
+                deleted_count += 1
+            except Exception as e:
+                logger.warning(f"파일 삭제 실패: {file_info['filename']} - {e}")
+        
+        return best_file['filename'], deleted_count
     
     for record in records:
         record_id = record.get('id')
         fields = record.get('fields', {})
         
-        # 이미지 URL 목록 수집
-        image_urls = []
-        
-        # 대표사진 필드 처리
-        if isinstance(fields.get('대표사진'), list) and fields['대표사진']:
-            for attachment in fields['대표사진']:
-                if attachment.get('url'):
-                    image_urls.append({
-                        'url': attachment['url'],
-                        'filename': attachment.get('filename', ''),
-                        'type': 'representative'
-                    })
-        
-        # 사진링크 필드 처리
-        if fields.get('사진링크'):
-            photo_links = fields['사진링크'].split(',')
-            for i, link in enumerate(photo_links):
-                link = link.strip()
-                if link:
-                    image_urls.append({
-                        'url': link,
-                        'filename': f'photo_{i+1}',
-                        'type': 'link'
-                    })
-        
-        # 레코드에 이미지가 없으면 다음으로
-        if not image_urls:
+        if not record_id:
             continue
         
         # 레코드별 이미지 디렉토리
         record_image_dir = os.path.join(image_dir, record_id)
         os.makedirs(record_image_dir, exist_ok=True)
         
-        # 이미지 다운로드 및 처리
-        for img_info in image_urls:
-            url = img_info['url']
-            img_type = img_info['type']
-            
-            # URL에서 파일명 추출 또는 생성
+        # 🔧 기존 중복 파일들 정리
+        existing_best_file, deleted_count = clean_existing_duplicates(record_image_dir, record_id)
+        cleaned_duplicates += deleted_count
+        
+        # 기존에 좋은 파일이 있으면 새로 다운로드하지 않음
+        if existing_best_file:
+            # 메타데이터 업데이트
+            image_metadata[f"{record_id}_optimized"] = True
+            image_metadata[f"{record_id}_filename"] = existing_best_file
+            skipped_images += 1
+            continue
+        
+        # 🆕 새로운 이미지 다운로드 로직
+        image_urls = []
+        processed_urls = set()  # 중복 URL 방지
+        
+        # 우선순위 1: 대표사진 필드 (원본 파일명 유지)
+        if isinstance(fields.get('대표사진'), list) and fields['대표사진']:
+            for i, attachment in enumerate(fields['대표사진']):
+                if attachment.get('url') and attachment['url'] not in processed_urls:
+                    original_filename = attachment.get('filename', f'representative_{i+1}.jpg')
+                    image_urls.append({
+                        'url': attachment['url'],
+                        'filename': original_filename,
+                        'type': 'representative',
+                        'priority': 1
+                    })
+                    processed_urls.add(attachment['url'])
+        
+        # 우선순위 2: 사진링크 필드 (대표사진에 없는 URL만)
+        if fields.get('사진링크'):
+            photo_links = fields['사진링크'].split(',')
+            for i, link in enumerate(photo_links):
+                link = link.strip()
+                if link and link.startswith('http') and link not in processed_urls:
+                    image_urls.append({
+                        'url': link,
+                        'filename': f'photo_link_{i+1}.jpg',
+                        'type': 'link',
+                        'priority': 2
+                    })
+                    processed_urls.add(link)
+        
+        # 레코드에 이미지가 없으면 다음으로
+        if not image_urls:
+            continue
+        
+        # 우선순위 순으로 정렬 후 첫 번째만 다운로드
+        image_urls.sort(key=lambda x: x['priority'])
+        img_info = image_urls[0]  # 가장 우선순위 높은 이미지만
+        
+        url = img_info['url']
+        img_type = img_info['type']
+        
+        try:
+            # 파일명 처리
             parsed_url = urlparse(url)
             path_parts = Path(parsed_url.path).parts
-            filename = img_info['filename'] or path_parts[-1]
+            original_filename = img_info['filename'] or path_parts[-1]
             
-            # 확장자 확인 및 수정
-            if '.' not in filename:
-                filename += '.jpg'  # 기본 확장자
+            # 확장자 확인
+            if '.' not in original_filename:
+                original_filename += '.jpg'
+            
+            # 파일명 정리 (특수문자 제거)
+            filename = "".join(c for c in original_filename if c.isalnum() or c in '.-_').strip()
+            if not filename or filename == '.jpg':
+                filename = f"image_{int(time.time())}.jpg"
             
             # 이미지 파일 경로
             image_path = os.path.join(record_image_dir, filename)
@@ -306,45 +397,84 @@ def backup_property_images(records):
             url_hash = hashlib.md5(url.encode()).hexdigest()
             
             # 메타데이터에서 이전 해시 확인
-            prev_hash = image_metadata.get(f"{record_id}_{filename}")
+            prev_hash = image_metadata.get(f"{record_id}_hash")
             
             # 이미지가 이미 존재하고 해시가 같으면 스킵
             if os.path.exists(image_path) and prev_hash == url_hash:
                 skipped_images += 1
                 continue
             
-            try:
-                # 이미지 다운로드
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    with open(image_path, 'wb') as f:
-                        f.write(response.content)
+            # 이미지 다운로드
+            logger.info(f"이미지 다운로드 시작: {record_id} -> {filename}")
+            response = requests.get(url, timeout=30, stream=True)
+            
+            if response.status_code == 200:
+                # 임시 파일로 먼저 다운로드
+                temp_path = image_path + '.tmp'
+                
+                with open(temp_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                # 파일 크기 확인 (최소 1KB)
+                if os.path.getsize(temp_path) > 1000:
+                    # 성공적으로 다운로드되면 정식 파일로 이동
+                    os.rename(temp_path, image_path)
                     
                     # 메타데이터 업데이트
-                    image_metadata[f"{record_id}_{filename}"] = url_hash
+                    image_metadata[f"{record_id}_hash"] = url_hash
+                    image_metadata[f"{record_id}_filename"] = filename
+                    image_metadata[f"{record_id}_type"] = img_type
+                    image_metadata[f"{record_id}_optimized"] = True
                     
                     if prev_hash:
                         updated_images += 1
-                        logger.info(f"이미지 업데이트: {filename} ({img_type})")
+                        logger.info(f"✅ 이미지 업데이트: {filename} ({img_type})")
                     else:
                         new_images += 1
-                        logger.info(f"새 이미지 저장: {filename} ({img_type})")
+                        logger.info(f"✅ 새 이미지 저장: {filename} ({img_type})")
                 else:
-                    logger.warning(f"이미지 다운로드 실패: {url}, 상태 코드: {response.status_code}")
-            except Exception as e:
-                logger.error(f"이미지 다운로드 중 오류: {url}, 오류: {str(e)}")
+                    # 파일이 너무 작으면 삭제
+                    os.remove(temp_path)
+                    logger.warning(f"파일 크기가 너무 작음: {url}")
+                    error_images += 1
+            else:
+                logger.warning(f"이미지 다운로드 실패: {url}, 상태 코드: {response.status_code}")
+                error_images += 1
+                
+        except Exception as e:
+            logger.error(f"이미지 처리 중 오류: {url}, 오류: {str(e)}")
+            error_images += 1
     
     # 메타데이터 저장
-    with open(metadata_path, 'w', encoding='utf-8') as f:
-        json.dump(image_metadata, f, ensure_ascii=False, indent=2)
+    try:
+        image_metadata['last_optimization'] = datetime.now().isoformat()
+        image_metadata['optimization_stats'] = {
+            'duplicates_cleaned': cleaned_duplicates,
+            'new_images': new_images,
+            'updated_images': updated_images
+        }
+        
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(image_metadata, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"이미지 메타데이터 저장 실패: {str(e)}")
     
-    logger.info(f"이미지 백업 완료: 새 이미지 {new_images}개, 업데이트 {updated_images}개, 스킵 {skipped_images}개")
+    logger.info(f"🎉 이미지 백업 최적화 완료!")
+    logger.info(f"   - 새 이미지: {new_images}개")
+    logger.info(f"   - 업데이트: {updated_images}개") 
+    logger.info(f"   - 스킵: {skipped_images}개")
+    logger.info(f"   - 오류: {error_images}개")
+    logger.info(f"   - 중복 파일 정리: {cleaned_duplicates}개")
     
     return {
         'new_images': new_images,
         'updated_images': updated_images,
         'skipped_images': skipped_images,
-        'total_processed': new_images + updated_images + skipped_images
+        'error_images': error_images,
+        'duplicates_cleaned': cleaned_duplicates,
+        'total_processed': new_images + updated_images + skipped_images + error_images,
+        'optimization_enabled': True
     }
 
 def cleanup_old_backups():
