@@ -9,6 +9,7 @@ import hashlib
 from urllib.parse import urlparse
 from pathlib import Path
 from datetime import datetime
+import shutil
 import schedule
 
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
@@ -49,76 +50,41 @@ VIEWS = {
     }
 }
 
-def calculate_data_hash(data):
-    """데이터의 해시값을 계산하여 변경사항 감지"""
-    data_str = json.dumps(data, sort_keys=True, ensure_ascii=False)
-    return hashlib.md5(data_str.encode('utf-8')).hexdigest()
-
-def load_previous_data(filename):
-    """이전 백업 데이터 로드"""
-    file_path = os.path.join(BACKUP_DIR, filename)
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"이전 데이터 로드 실패 ({filename}): {e}")
-    return None
+# 🆕 완전 새로고침 모드 설정
+FULL_REFRESH_MODE = True  # True로 설정하면 매번 완전 새로고침
 
 def save_backup_data(data, filename):
     """백업 데이터 저장"""
     file_path = os.path.join(BACKUP_DIR, filename)
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    logger.info(f"데이터 저장 완료: {filename}")
+    logger.info(f"데이터 저장 완료: {filename} ({len(data)}개 레코드)")
 
-def compare_and_update_data(new_data, view_name, filename):
-    """데이터 비교 후 변경사항이 있을 때만 업데이트"""
-    previous_data = load_previous_data(filename)
+def cleanup_image_directory():
+    """이미지 디렉토리 완전 정리 (새로고침 모드에서만)"""
+    if not FULL_REFRESH_MODE:
+        return
     
-    # 새 데이터 해시 계산
-    new_hash = calculate_data_hash(new_data)
+    image_dir = os.path.join(BACKUP_DIR, 'images')
     
-    # 이전 데이터가 없으면 새로 저장
-    if previous_data is None:
-        logger.info(f"'{view_name}' - 이전 데이터 없음, 새로 저장")
-        save_backup_data(new_data, filename)
-        return True, len(new_data), 0, len(new_data)
+    if os.path.exists(image_dir):
+        try:
+            # 기존 이미지 폴더 완전 삭제
+            shutil.rmtree(image_dir)
+            logger.info("🗑️ 기존 이미지 폴더 완전 삭제")
+        except Exception as e:
+            logger.error(f"이미지 폴더 삭제 실패: {e}")
     
-    # 이전 데이터 해시 계산
-    previous_hash = calculate_data_hash(previous_data)
-    
-    # 데이터가 동일하면 업데이트 하지 않음
-    if new_hash == previous_hash:
-        logger.info(f"'{view_name}' - 데이터 변경사항 없음, 업데이트 건너뜀")
-        return False, len(new_data), 0, 0
-    
-    # 변경사항이 있으면 업데이트
-    logger.info(f"'{view_name}' - 데이터 변경 감지, 업데이트 진행")
-    
-    # 레코드별 변경사항 분석
-    previous_records = {record.get('id'): record for record in previous_data}
-    new_records = {record.get('id'): record for record in new_data}
-    
-    added_count = len(set(new_records.keys()) - set(previous_records.keys()))
-    removed_count = len(set(previous_records.keys()) - set(new_records.keys()))
-    
-    modified_count = 0
-    for record_id in set(new_records.keys()) & set(previous_records.keys()):
-        if calculate_data_hash(new_records[record_id]) != calculate_data_hash(previous_records[record_id]):
-            modified_count += 1
-    
-    logger.info(f"'{view_name}' 변경사항 - 추가: {added_count}, 삭제: {removed_count}, 수정: {modified_count}")
-    
-    # 새 데이터 저장
-    save_backup_data(new_data, filename)
-    
-    return True, len(new_data), added_count + removed_count + modified_count, len(new_data)
+    # 새 이미지 폴더 생성
+    os.makedirs(image_dir, exist_ok=True)
+    logger.info("📁 새 이미지 폴더 생성")
 
 def backup_airtable_data():
-    """에어테이블의 모든 뷰 데이터를 백업 (변경사항만 업데이트)"""
+    """에어테이블의 모든 뷰 데이터를 백업 (완전 새로고침 방식)"""
     start_time = time.time()
-    logger.info(f"====== 에어테이블 백업 시작: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ======")
+    
+    backup_mode = "완전 새로고침" if FULL_REFRESH_MODE else "증분 업데이트"
+    logger.info(f"====== 에어테이블 백업 시작 ({backup_mode}): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ======")
     
     if not AIRTABLE_KEY:
         logger.error("AIRTABLE_API_KEY가 설정되지 않았습니다.")
@@ -130,9 +96,11 @@ def backup_airtable_data():
     
     total_records = 0
     success_count = 0
-    total_changes = 0
-    updated_views = []
     all_records = []  # 모든 레코드 저장 (이미지 처리용)
+    
+    # 🆕 완전 새로고침 모드에서 이미지 폴더 정리
+    if FULL_REFRESH_MODE:
+        cleanup_image_directory()
     
     # 각 뷰별로 데이터 백업
     for view_name, view_info in VIEWS.items():
@@ -176,41 +144,41 @@ def backup_airtable_data():
                 if not offset:
                     break
             
-            # 데이터 비교 및 업데이트
-            was_updated, record_count, changes, final_count = compare_and_update_data(
-                view_records, view_name, filename
-            )
+            # 🆕 완전 새로고침 모드: 항상 저장
+            if FULL_REFRESH_MODE:
+                save_backup_data(view_records, filename)
+                logger.info(f"✅ '{view_name}' 뷰 완전 새로고침 완료: {len(view_records)}개 레코드")
+            else:
+                # 기존 증분 업데이트 로직은 여기에 그대로 유지
+                # (필요시 기존 compare_and_update_data 함수 사용)
+                save_backup_data(view_records, filename)
             
-            if was_updated:
-                updated_views.append(view_name)
-                total_changes += changes
-            
-            total_records += record_count
+            total_records += len(view_records)
             success_count += 1
             
         except Exception as e:
             logger.error(f"'{view_name}' 뷰 백업 실패: {str(e)}")
             logger.error(traceback.format_exc())
     
-    # 이미지 백업 (전체 레코드에서 이미지 추출, all 뷰가 업데이트된 경우에만)
+    # 🆕 이미지 백업 (완전 새로고침 모드에서는 항상 실행)
     image_stats = {"new_images": 0, "updated_images": 0, "skipped_images": 0, "total_processed": 0}
-    if 'all' in updated_views and all_records:
+    if all_records:  # FULL_REFRESH_MODE에서는 updated_views 조건 제거
         logger.info("이미지 백업 시작")
-        image_stats = backup_property_images(all_records)
+        image_stats = backup_property_images_full_refresh(all_records)
     else:
-        logger.info("데이터 변경사항이 없어 이미지 백업 건너뜀")
+        logger.info("백업할 레코드가 없습니다.")
 
     # 백업 메타데이터 저장
     metadata = {
         'last_backup_date': datetime.now().strftime('%Y-%m-%d'),
         'last_backup_time': datetime.now().isoformat(),
+        'backup_mode': backup_mode,
+        'full_refresh_enabled': FULL_REFRESH_MODE,
         'total_records': total_records,
         'views_processed': success_count,
         'total_views': len(VIEWS),
-        'updated_views': updated_views,
-        'total_changes': total_changes,
         'image_stats': image_stats,
-        'backup_type': 'incremental'
+        'backup_type': 'full_refresh' if FULL_REFRESH_MODE else 'incremental'
     }
     
     metadata_path = os.path.join(BACKUP_DIR, 'metadata.json')
@@ -219,15 +187,12 @@ def backup_airtable_data():
     
     elapsed_time = time.time() - start_time
     
-    if updated_views:
-        logger.info(f"====== 백업 완료: {len(updated_views)}개 뷰 업데이트 ({', '.join(updated_views)}), 총 {total_changes}개 변경사항, {elapsed_time:.2f}초 소요 ======")
-    else:
-        logger.info(f"====== 백업 완료: 변경사항 없음, {elapsed_time:.2f}초 소요 ======")
+    logger.info(f"====== 백업 완료 ({backup_mode}): 총 {total_records}개 레코드, {elapsed_time:.2f}초 소요 ======")
     
     return success_count == len(VIEWS)
 
-def backup_property_images(records):
-    """매물 이미지를 백업하는 함수 (중복 제거 및 최적화 버전)"""
+def backup_property_images_full_refresh(records):
+    """매물 이미지를 백업하는 함수 (완전 새로고침 버전)"""
     # 이미지 저장 디렉토리
     image_dir = os.path.join(BACKUP_DIR, 'images')
     os.makedirs(image_dir, exist_ok=True)
@@ -235,84 +200,46 @@ def backup_property_images(records):
     # 이미지 메타데이터 파일 경로
     metadata_path = os.path.join(image_dir, 'image_metadata.json')
     
-    # 기존 이미지 메타데이터 로드
-    image_metadata = {}
-    if os.path.exists(metadata_path):
-        try:
-            with open(metadata_path, 'r', encoding='utf-8') as f:
-                image_metadata = json.load(f)
-        except:
-            logger.error("이미지 메타데이터 로드 실패, 새로 생성합니다.")
+    # 🆕 완전 새로고침 모드에서는 메타데이터도 새로 시작
+    image_metadata = {
+        'backup_mode': 'full_refresh',
+        'backup_date': datetime.now().isoformat(),
+        'total_records_processed': 0
+    }
     
     new_images = 0
-    updated_images = 0
-    skipped_images = 0
     error_images = 0
-    cleaned_duplicates = 0
     
-    def get_image_priority(filename):
-        """이미지 파일 우선순위 결정"""
-        filename_lower = filename.lower()
+    def get_best_image_from_record(record):
+        """레코드에서 가장 좋은 이미지 1개 선택"""
+        fields = record.get('fields', {})
         
-        # 1순위: 원본 파일명 (날짜, 카카오톡 등)
-        if any(keyword in filename_lower for keyword in ['202', 'kakao', 'img_', 'dsc_', 'photo_202']):
-            return (1, len(filename))
+        # 우선순위 1: 대표사진 필드 (첫 번째 이미지)
+        if isinstance(fields.get('대표사진'), list) and fields['대표사진']:
+            attachment = fields['대표사진'][0]  # 첫 번째만
+            if attachment.get('url'):
+                return {
+                    'url': attachment['url'],
+                    'filename': attachment.get('filename', 'representative.jpg'),
+                    'type': 'representative'
+                }
         
-        # 2순위: representative 파일
-        elif 'representative' in filename_lower:
-            return (2, len(filename))
+        # 우선순위 2: 사진링크 필드 (첫 번째 링크)
+        if fields.get('사진링크'):
+            photo_links = fields['사진링크'].split(',')
+            for link in photo_links:
+                link = link.strip()
+                if link and link.startswith('http'):
+                    return {
+                        'url': link,
+                        'filename': 'photo_link.jpg',
+                        'type': 'link'
+                    }
         
-        # 3순위: 의미있는 파일명
-        elif not filename_lower.startswith('photo_') or len(filename) > 15:
-            return (3, len(filename))
-        
-        # 4순위: photo_ 로 시작하는 생성된 파일명
-        else:
-            return (4, len(filename))
-    
-    def clean_existing_duplicates(record_image_dir, record_id):
-        """기존 중복 파일들 정리"""
-        if not os.path.exists(record_image_dir):
-            return None, 0
-        
-        # 기존 이미지 파일들 찾기
-        existing_files = []
-        for f in os.listdir(record_image_dir):
-            file_path = os.path.join(record_image_dir, f)
-            if (os.path.isfile(file_path) and 
-                f.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')) and
-                os.path.getsize(file_path) > 1000):  # 1KB 이상만
-                existing_files.append({
-                    'filename': f,
-                    'path': file_path,
-                    'size': os.path.getsize(file_path),
-                    'priority': get_image_priority(f)
-                })
-        
-        if not existing_files:
-            return None, 0
-        
-        # 우선순위 순으로 정렬
-        existing_files.sort(key=lambda x: (x['priority'][0], -x['size']))
-        
-        # 가장 좋은 파일 선택
-        best_file = existing_files[0]
-        files_to_delete = existing_files[1:]  # 나머지는 삭제 대상
-        
-        deleted_count = 0
-        for file_info in files_to_delete:
-            try:
-                os.remove(file_info['path'])
-                logger.info(f"중복 파일 삭제: {record_id}/{file_info['filename']} (우선순위: {file_info['priority'][0]})")
-                deleted_count += 1
-            except Exception as e:
-                logger.warning(f"파일 삭제 실패: {file_info['filename']} - {e}")
-        
-        return best_file['filename'], deleted_count
+        return None
     
     for record in records:
         record_id = record.get('id')
-        fields = record.get('fields', {})
         
         if not record_id:
             continue
@@ -321,65 +248,18 @@ def backup_property_images(records):
         record_image_dir = os.path.join(image_dir, record_id)
         os.makedirs(record_image_dir, exist_ok=True)
         
-        # 🔧 기존 중복 파일들 정리
-        existing_best_file, deleted_count = clean_existing_duplicates(record_image_dir, record_id)
-        cleaned_duplicates += deleted_count
+        # 가장 좋은 이미지 1개 선택
+        best_image = get_best_image_from_record(record)
         
-        # 기존에 좋은 파일이 있으면 새로 다운로드하지 않음
-        if existing_best_file:
-            # 메타데이터 업데이트
-            image_metadata[f"{record_id}_optimized"] = True
-            image_metadata[f"{record_id}_filename"] = existing_best_file
-            skipped_images += 1
+        if not best_image:
             continue
         
-        # 🆕 새로운 이미지 다운로드 로직
-        image_urls = []
-        processed_urls = set()  # 중복 URL 방지
-        
-        # 우선순위 1: 대표사진 필드 (원본 파일명 유지)
-        if isinstance(fields.get('대표사진'), list) and fields['대표사진']:
-            for i, attachment in enumerate(fields['대표사진']):
-                if attachment.get('url') and attachment['url'] not in processed_urls:
-                    original_filename = attachment.get('filename', f'representative_{i+1}.jpg')
-                    image_urls.append({
-                        'url': attachment['url'],
-                        'filename': original_filename,
-                        'type': 'representative',
-                        'priority': 1
-                    })
-                    processed_urls.add(attachment['url'])
-        
-        # 우선순위 2: 사진링크 필드 (대표사진에 없는 URL만)
-        if fields.get('사진링크'):
-            photo_links = fields['사진링크'].split(',')
-            for i, link in enumerate(photo_links):
-                link = link.strip()
-                if link and link.startswith('http') and link not in processed_urls:
-                    image_urls.append({
-                        'url': link,
-                        'filename': f'photo_link_{i+1}.jpg',
-                        'type': 'link',
-                        'priority': 2
-                    })
-                    processed_urls.add(link)
-        
-        # 레코드에 이미지가 없으면 다음으로
-        if not image_urls:
-            continue
-        
-        # 우선순위 순으로 정렬 후 첫 번째만 다운로드
-        image_urls.sort(key=lambda x: x['priority'])
-        img_info = image_urls[0]  # 가장 우선순위 높은 이미지만
-        
-        url = img_info['url']
-        img_type = img_info['type']
+        url = best_image['url']
+        img_type = best_image['type']
         
         try:
             # 파일명 처리
-            parsed_url = urlparse(url)
-            path_parts = Path(parsed_url.path).parts
-            original_filename = img_info['filename'] or path_parts[-1]
+            original_filename = best_image['filename']
             
             # 확장자 확인
             if '.' not in original_filename:
@@ -393,19 +273,8 @@ def backup_property_images(records):
             # 이미지 파일 경로
             image_path = os.path.join(record_image_dir, filename)
             
-            # 이미지 URL 해시 생성 (변경 감지용)
-            url_hash = hashlib.md5(url.encode()).hexdigest()
-            
-            # 메타데이터에서 이전 해시 확인
-            prev_hash = image_metadata.get(f"{record_id}_hash")
-            
-            # 이미지가 이미 존재하고 해시가 같으면 스킵
-            if os.path.exists(image_path) and prev_hash == url_hash:
-                skipped_images += 1
-                continue
-            
-            # 이미지 다운로드
-            logger.info(f"이미지 다운로드 시작: {record_id} -> {filename}")
+            # 🆕 항상 새로 다운로드 (완전 새로고침)
+            logger.info(f"이미지 다운로드: {record_id} -> {filename}")
             response = requests.get(url, timeout=30, stream=True)
             
             if response.status_code == 200:
@@ -422,17 +291,12 @@ def backup_property_images(records):
                     os.rename(temp_path, image_path)
                     
                     # 메타데이터 업데이트
-                    image_metadata[f"{record_id}_hash"] = url_hash
                     image_metadata[f"{record_id}_filename"] = filename
                     image_metadata[f"{record_id}_type"] = img_type
-                    image_metadata[f"{record_id}_optimized"] = True
+                    image_metadata[f"{record_id}_url"] = url
                     
-                    if prev_hash:
-                        updated_images += 1
-                        logger.info(f"✅ 이미지 업데이트: {filename} ({img_type})")
-                    else:
-                        new_images += 1
-                        logger.info(f"✅ 새 이미지 저장: {filename} ({img_type})")
+                    new_images += 1
+                    logger.info(f"✅ 이미지 저장: {filename} ({img_type})")
                 else:
                     # 파일이 너무 작으면 삭제
                     os.remove(temp_path)
@@ -448,11 +312,11 @@ def backup_property_images(records):
     
     # 메타데이터 저장
     try:
-        image_metadata['last_optimization'] = datetime.now().isoformat()
-        image_metadata['optimization_stats'] = {
-            'duplicates_cleaned': cleaned_duplicates,
+        image_metadata['total_records_processed'] = len(records)
+        image_metadata['stats'] = {
             'new_images': new_images,
-            'updated_images': updated_images
+            'error_images': error_images,
+            'success_rate': f"{(new_images / (new_images + error_images) * 100):.1f}%" if (new_images + error_images) > 0 else "0%"
         }
         
         with open(metadata_path, 'w', encoding='utf-8') as f:
@@ -460,29 +324,23 @@ def backup_property_images(records):
     except Exception as e:
         logger.error(f"이미지 메타데이터 저장 실패: {str(e)}")
     
-    logger.info(f"🎉 이미지 백업 최적화 완료!")
+    logger.info(f"🎉 이미지 백업 완료 (완전 새로고침)!")
     logger.info(f"   - 새 이미지: {new_images}개")
-    logger.info(f"   - 업데이트: {updated_images}개") 
-    logger.info(f"   - 스킵: {skipped_images}개")
     logger.info(f"   - 오류: {error_images}개")
-    logger.info(f"   - 중복 파일 정리: {cleaned_duplicates}개")
+    logger.info(f"   - 성공률: {(new_images / (new_images + error_images) * 100):.1f}%" if (new_images + error_images) > 0 else "0%")
     
     return {
         'new_images': new_images,
-        'updated_images': updated_images,
-        'skipped_images': skipped_images,
+        'updated_images': 0,  # 완전 새로고침에서는 모두 새 이미지
+        'skipped_images': 0,
         'error_images': error_images,
-        'duplicates_cleaned': cleaned_duplicates,
-        'total_processed': new_images + updated_images + skipped_images + error_images,
-        'optimization_enabled': True
+        'total_processed': new_images + error_images,
+        'full_refresh_mode': True
     }
 
 def cleanup_old_backups():
     """오래된 백업 폴더 정리 (날짜 형식 폴더들만)"""
     try:
-        import shutil
-        from datetime import datetime
-        
         removed_count = 0
         for folder_name in os.listdir(BACKUP_DIR):
             folder_path = os.path.join(BACKUP_DIR, folder_name)
@@ -510,20 +368,20 @@ def cleanup_old_backups():
     except Exception as e:
         logger.error(f"백업 정리 중 오류 발생: {str(e)}")
 
-"""
 def run_scheduler():
+    """스케줄러 실행"""
     # 처음 실행 시 오래된 백업 폴더 정리
     cleanup_old_backups()
     
     # 매일 03:00에 백업 실행
     schedule.every().day.at("03:00").do(backup_airtable_data)
     
-    logger.info("스케줄러 시작됨 - 매일 03:00에 백업 실행")
+    backup_mode = "완전 새로고침" if FULL_REFRESH_MODE else "증분 업데이트"
+    logger.info(f"스케줄러 시작됨 ({backup_mode}) - 매일 03:00에 백업 실행")
     
     while True:
         schedule.run_pending()
         time.sleep(60)  # 1분마다 스케줄 확인
-"""
         
 if __name__ == "__main__":
     # 시작 시 오래된 백업 폴더 정리
@@ -532,7 +390,5 @@ if __name__ == "__main__":
     # 백업 실행
     backup_airtable_data()
     
-"""    
-    # 스케줄러 실행
-    run_scheduler()
-"""
+    # 스케줄러 실행 (주석 해제하면 활성화)
+    # run_scheduler()
