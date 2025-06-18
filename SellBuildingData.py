@@ -321,19 +321,25 @@ def create_map():
     // 마커 참조 저장
     var markers = {{}};
 
-    // Leaflet 맵이 로드된 후 실행
+    // Leaflet 맵이 로드된 후 실행 - 수정된 버전
     document.addEventListener('DOMContentLoaded', function() {{
+        console.log('지도 초기화 시작');
+        
         // 실제 leaflet 맵 변수를 자동으로 찾기
         var actualMap = null;
         for (var key in window) {{
             if (key.startsWith('leaflet_map_') && window[key] && window[key].eachLayer) {{
                 actualMap = window[key];
                 window.leafletMap = actualMap; // 별칭 생성
+                console.log('지도 변수 찾음:', key);
                 break;
             }}
         }}
         
         if (actualMap) {{
+            console.log('지도 변수 설정 완료:', actualMap);
+            
+            // 마커 설정
             actualMap.eachLayer(function(layer) {{
                 if (layer instanceof L.Marker) {{
                     var markerName = layer._myName;
@@ -343,6 +349,20 @@ def create_map():
                     }}
                 }}
             }});
+            
+            console.log('마커 설정 완료:', Object.keys(markers).length, '개');
+        }} else {{
+            console.error('지도 변수를 찾을 수 없습니다!');
+            // 지연 후 다시 시도
+            setTimeout(function() {{
+                for (var key in window) {{
+                    if (key.startsWith('leaflet_map_') && window[key] && window[key].eachLayer) {{
+                        window.leafletMap = window[key];
+                        console.log('지연 후 지도 변수 설정:', key);
+                        break;
+                    }}
+                }}
+            }}, 1000);
         }}
     }});
     
