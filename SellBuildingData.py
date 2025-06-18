@@ -118,6 +118,74 @@ def geocode_address(address):
         print(f"주소 변환 실패: {address}, 에러: {e}")
     return None, None
 
+def safe_string_for_js(text):
+    """JavaScript에서 안전하게 사용할 수 있도록 문자열 처리"""
+    if not text:
+        return ""
+    
+    # 위험한 문자들을 안전하게 변환
+    text = str(text)
+    text = text.replace('\\', '\\\\')  # 백슬래시
+    text = text.replace("'", "\\'")    # 작은따옴표
+    text = text.replace('"', '\\"')    # 큰따옴표
+    text = text.replace('\n', '\\n')   # 줄바꿈
+    text = text.replace('\r', '\\r')   # 캐리지 리턴
+    text = text.replace('\t', '\\t')   # 탭
+    
+    return text
+
+def create_safe_popup_html(name, address, price_display, field_values, record_id):
+    """안전한 팝업 HTML 생성"""
+    
+    # 문자열을 안전하게 처리
+    safe_name = safe_string_for_js(name)
+    safe_address = safe_string_for_js(address)
+    safe_record_id = safe_string_for_js(record_id)
+    
+    popup_html = f"""
+<div class="popup-content">
+    <div class="popup-title">{safe_name}</div>
+    <div class="popup-info">매가: {price_display}</div>
+"""
+    
+    # 토지면적 정보
+    if field_values.get('토지면적(㎡)'):
+        try:
+            sqm = float(field_values['토지면적(㎡)'])
+            pyeong = round(sqm / 3.3058)
+            popup_html += f'    <div class="popup-info">대지: {pyeong}평 ({sqm}㎡)</div>\n'
+        except:
+            pass
+    
+    # 층수 정보        
+    if field_values.get('층수'):
+        popup_html += f'    <div class="popup-info">층수: {field_values["층수"]}</div>\n'
+    
+    # 주용도 정보
+    if field_values.get('주용도'):
+        popup_html += f'    <div class="popup-info">용도: {field_values["주용도"]}</div>\n'
+
+    # 상세내역 보기 링크 (안전한 방식)
+    popup_html += f'''    <a href="javascript:void(0);" 
+       onclick="handlePropertyDetail('{safe_record_id}')"
+       class="detail-link">
+       상세내역보기-클릭
+    </a>
+'''
+
+    # 문의하기 링크 (안전한 방식)
+    popup_html += f'''    <a href="javascript:void(0);" 
+       onclick="handleConsultModal('{safe_address}')"
+       class="detail-link" 
+       style="background-color:#2962FF; color:white; margin-top:5px;">
+       이 매물 문의하기
+    </a>
+'''
+
+    popup_html += "</div>"
+    
+    return popup_html
+
 def create_map():
     folium_map = folium.Map(location=[37.4834458778777, 126.970207234818], zoom_start=15)
     folium_map._name = 'leafletMap'  # 변수명 변경
@@ -245,119 +313,30 @@ def create_map():
         except:
             property_price = 0
             
-        javascript_data.append({
+        # 안전한 데이터 처리
+        safe_data = {
             'index': marker_index,
             'lat': lat,
             'lon': lon,
-            'name': name,
-            'address': address,
-            'price': property_price,  # 수정된 부분
+            'name': safe_string_for_js(name),
+            'address': safe_string_for_js(address),
+            'price': property_price,
             'investment': float(field_values.get('실투자금', 0)) if field_values.get('실투자금') else 0,
             'yield': float(field_values.get('융자제외수익률(%)', 0)) if field_values.get('융자제외수익률(%)') else 0,
             'area': float(field_values.get('토지면적(㎡)', 0)) if field_values.get('토지면적(㎡)') else 0,
-            'approval_date': field_values.get('사용승인일', ''),
-            'record_id': record_id,
-            'layers': field_values.get('층수', ''),
-            'usage': field_values.get('주용도', ''),
+            'approval_date': safe_string_for_js(field_values.get('사용승인일', '')),
+            'record_id': safe_string_for_js(record_id),
+            'layers': safe_string_for_js(field_values.get('층수', '')),
+            'usage': safe_string_for_js(field_values.get('주용도', '')),
             'land_area': field_values.get('토지면적(㎡)', 0)
-        })
+        }
+        
+        javascript_data.append(safe_data)
 
         price_display = f"{price:,}만원" if isinstance(price, int) and price < 10000 else f"{price / 10000:.1f}억원".rstrip('0').rstrip('.') if isinstance(price, int) else (price or "가격정보 없음")
 
-        # 에어테이블 레코드 링크 생성
-        detail_url = f"/property-detail.html?id={record_id}"
-        
-        # 개선된 팝업 HTML 구조
-        # SellBuildingData.py에서 팝업 HTML 생성 부분 수정
-
-        # 기존 팝업 HTML 생성 부분을 다음과 같이 수정:
-
-        popup_html = f"""
-        <div class="popup-content">
-            <div class="popup-title">{name}</div>
-            <div class="popup-info">매가: {price_display}</div>
-        """
-
-        if field_values.get('토지면적(㎡)'):
-            try:
-                sqm = float(field_values['토지면적(㎡)'])
-                pyeong = round(sqm / 3.3058)
-                popup_html += f'<div class="popup-info">대지: {pyeong}평 ({sqm}㎡)</div>'
-            except:
-                pass
-                
-        if field_values.get('층수'):
-            popup_html += f'<div class="popup-info">층수: {field_values["층수"]}</div>'
-            
-        if field_values.get('주용도'):
-            popup_html += f'<div class="popup-info">용도: {field_values["주용도"]}</div>'
-
-        # ← 상세내역 보기 링크 수정 (더 안전한 방법으로)
-        popup_html += f'''
-        <a href="javascript:void(0);" 
-        onclick="(function() {{
-            try {{
-                // 부모 창에서 전체화면 상태 확인
-                if (parent.document.querySelector('.map-container.fullscreen')) {{
-                    console.log('전체화면 상태에서 매물 상세 열기');
-                    // 전체화면 상태에서는 포커스도 이동
-                    parent.focus();
-                }}
-                if (parent.openPropertyDetailGlobal) {{
-                    parent.openPropertyDetailGlobal('{record_id}');
-                }} else if (parent.openPropertyDetailModal) {{
-                    parent.openPropertyDetailModal('{record_id}');
-                }} else {{
-                    parent.postMessage({{
-                        action: 'openPropertyDetail',
-                        recordId: '{record_id}',
-                        isFullscreen: !!parent.document.querySelector('.map-container.fullscreen')
-                    }}, '*');
-                }}
-            }} catch(e) {{
-                console.error('매물 상세 열기 실패:', e);
-                parent.postMessage({{
-                    action: 'openPropertyDetail',
-                    recordId: '{record_id}',
-                    isFullscreen: false
-                }}, '*');
-            }}
-        }})()"
-        class="detail-link">
-        상세내역보기-클릭
-        </a>
-        '''
-
-        # 이 매물 문의하기 링크도 수정
-        popup_html += f'''
-        <a href="javascript:void(0);" 
-        onclick="(function() {{
-            try {{
-                if (parent.openConsultModalGlobal) {{
-                    parent.openConsultModalGlobal('{address}');
-                }} else if (parent.openConsultModal) {{
-                    parent.openConsultModal('{address}');
-                }} else {{
-                    parent.postMessage({{
-                        action: 'openConsultModal',
-                        address: '{address}'
-                    }}, '*');
-                }}
-            }} catch(e) {{
-                console.error('상담 모달 열기 실패:', e);
-                parent.postMessage({{
-                    action: 'openConsultModal',
-                    address: '{address}'
-                }}, '*');
-            }}
-        }})()"
-        class="detail-link" 
-        style="background-color:#2962FF; color:white; margin-top:5px;">
-        이 매물 문의하기
-        </a>
-        '''
-
-        popup_html += "</div>"
+        # 안전한 팝업 HTML 생성
+        popup_html = create_safe_popup_html(name, address, price_display, field_values, record_id)
 
         bubble_html = f'<div class="price-bubble">{price_display}</div>'
         icon = folium.DivIcon(
@@ -376,15 +355,97 @@ def create_map():
         marker.add_to(folium_map)
         marker_index += 1
 
-    # JavaScript 필터링 코드 추가 - 완전 수정 버전
+    # 안전한 JavaScript 코드 생성
     javascript_code = f"""
-    <script>
-    var allProperties = {json.dumps(javascript_data, ensure_ascii=False)};
+<script>
+console.log('🔍 JavaScript 시작');
+
+try {{
+    // 데이터 로드
+    var allProperties = {json.dumps(javascript_data, ensure_ascii=False, indent=2)};
+    console.log('✅ 데이터 로드 완료:', allProperties.length, '개');
 
     // 마커 참조 저장
     var markers = {{}};
 
-    // Leaflet 맵이 로드된 후 실행 - 수정된 버전
+    // 안전한 매물 상세 핸들러
+    function handlePropertyDetail(recordId) {{
+        console.log('매물 상세 요청:', recordId);
+        
+        try {{
+            // 부모 창에서 전체화면 상태 확인
+            var isFullscreen = false;
+            try {{
+                isFullscreen = !!parent.document.querySelector('.map-container.fullscreen');
+            }} catch(e) {{
+                console.log('전체화면 상태 확인 실패:', e);
+            }}
+            
+            console.log('전체화면 상태:', isFullscreen);
+            
+            // 다양한 방법으로 매물 상세 모달 열기 시도
+            if (parent.openPropertyDetailGlobal) {{
+                parent.openPropertyDetailGlobal(recordId);
+            }} else if (parent.openPropertyDetailModal) {{
+                parent.openPropertyDetailModal(recordId);
+            }} else {{
+                // 메시지로 전달
+                parent.postMessage({{
+                    action: 'openPropertyDetail',
+                    recordId: recordId,
+                    isFullscreen: isFullscreen
+                }}, '*');
+            }}
+            
+            // 전체화면 상태에서는 포커스 이동
+            if (isFullscreen) {{
+                parent.focus();
+            }}
+            
+        }} catch(error) {{
+            console.error('매물 상세 열기 실패:', error);
+            // 폴백: 메시지 전달
+            try {{
+                parent.postMessage({{
+                    action: 'openPropertyDetail',
+                    recordId: recordId,
+                    isFullscreen: false
+                }}, '*');
+            }} catch(e) {{
+                console.error('메시지 전달도 실패:', e);
+            }}
+        }}
+    }}
+
+    // 안전한 상담 모달 핸들러
+    function handleConsultModal(address) {{
+        console.log('상담 모달 요청:', address);
+        
+        try {{
+            if (parent.openConsultModalGlobal) {{
+                parent.openConsultModalGlobal(address);
+            }} else if (parent.openConsultModal) {{
+                parent.openConsultModal(address);
+            }} else {{
+                parent.postMessage({{
+                    action: 'openConsultModal',
+                    address: address
+                }}, '*');
+            }}
+        }} catch(error) {{
+            console.error('상담 모달 열기 실패:', error);
+            try {{
+                parent.postMessage({{
+                    action: 'openConsultModal',
+                    address: address
+                }}, '*');
+            }} catch(e) {{
+                console.error('메시지 전달도 실패:', e);
+            }}
+        }}
+    }}
+
+    // Leaflet 맵이 로드된 후 실행
     document.addEventListener('DOMContentLoaded', function() {{
         console.log('지도 초기화 시작');
         
@@ -400,7 +461,7 @@ def create_map():
         }}
         
         if (actualMap) {{
-            console.log('지도 변수 설정 완료:', actualMap);
+            console.log('지도 변수 설정 완료');
             
             // 마커 설정
             actualMap.eachLayer(function(layer) {{
@@ -416,16 +477,6 @@ def create_map():
             console.log('마커 설정 완료:', Object.keys(markers).length, '개');
         }} else {{
             console.error('지도 변수를 찾을 수 없습니다!');
-            // 지연 후 다시 시도
-            setTimeout(function() {{
-                for (var key in window) {{
-                    if (key.startsWith('leaflet_map_') && window[key] && window[key].eachLayer) {{
-                        window.leafletMap = window[key];
-                        console.log('지연 후 지도 변수 설정:', key);
-                        break;
-                    }}
-                }}
-            }}, 1000);
         }}
     }});
     
@@ -449,14 +500,10 @@ def create_map():
         allProperties.forEach(function(property, index) {{
             var shouldShow = true;
             
-            // 디버깅용 로그
-            console.log('Property ' + index + ':', property);
-            
             // 매가 조건
             if (conditions.price_value && conditions.price_condition !== 'all') {{
                 var price = parseFloat(property.price) || 0;
                 var priceVal = parseFloat(conditions.price_value);
-                console.log('가격 비교: ' + price + ' vs ' + priceVal + ' (조건: ' + conditions.price_condition + ')');
                 if (conditions.price_condition === 'above' && price < priceVal) shouldShow = false;
                 if (conditions.price_condition === 'below' && price > priceVal) shouldShow = false;
             }}
@@ -518,7 +565,6 @@ def create_map():
     
     // 전체 마커 표시
     function showAllMarkers() {{
-        // 실제 맵 참조 가져오기
         var actualMap = window.leafletMap;
         if (!actualMap) {{
             for (var key in window) {{
@@ -540,7 +586,6 @@ def create_map():
     window.addEventListener('message', function(event) {{
         if (event.data.type === 'filter') {{
             var filtered = filterProperties(event.data.conditions);
-            // 부모 창에 결과 전송
             parent.postMessage({{
                 type: 'filterResult',
                 count: filtered.length
@@ -554,46 +599,13 @@ def create_map():
         }}
     }});
     
-    // 마커에 인덱스 저장
-    document.addEventListener('DOMContentLoaded', function() {{
-        // 실제 맵 참조 가져오기
-        var actualMap = window.leafletMap;
-        if (!actualMap) {{
-            for (var key in window) {{
-                if (key.startsWith('leaflet_map_') && window[key] && window[key].eachLayer) {{
-                    actualMap = window[key];
-                    window.leafletMap = actualMap; // 별칭 생성
-                }}
-            }}
-        }}
-        
-        if (actualMap) {{
-            actualMap.eachLayer(function(layer) {{
-                if (layer instanceof L.Marker && layer.options.icon) {{
-                    var iconHtml = layer.options.icon.options.html;
-                    var match = iconHtml.match(/>([\d,]+)만원<|>([\d.]+)억원</);
-                    if (match) {{
-                        var priceText = match[1] || match[2];
-                        for (var i = 0; i < allProperties.length; i++) {{
-                            var prop = allProperties[i];
-                            var propPrice = prop.price;
-                            var displayPrice = propPrice < 10000 ? 
-                                (propPrice + '').replace(/\B(?=(\d{{3}})+(?!\d))/g, ',') + '만원' :
-                                (propPrice / 10000).toFixed(1).replace(/\.0$/, '') + '억원';
-                            
-                            if (displayPrice.includes(priceText)) {{
-                                layer._myName = 'marker_' + i;
-                                markers[i] = layer;
-                                break;
-                            }}
-                        }}
-                    }}
-                }}
-            }});
-        }}
-    }});
-    </script>
-    """
+    console.log('✅ JavaScript 초기화 완료');
+    
+}} catch(error) {{
+    console.error('❌ JavaScript 오류:', error);
+}}
+</script>
+"""
     
     folium_map.get_root().header.add_child(folium.Element(javascript_code))
 
