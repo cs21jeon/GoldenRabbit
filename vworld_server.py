@@ -1164,25 +1164,29 @@ def setup_detailed_logging():
     class SensitiveDataFilter(logging.Filter):
         def __init__(self):
             super().__init__()
-            # 민감한 필드 패턴 정의
-            self.sensitive_patterns = [
-                r'(소유자명[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])',
-                r'(소유자생년월일[\'"]\s*:\s*)([\d]+)',
-                r'(소유자주소[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])',
-                r'(소유주연락처[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])',
-                r'(비공개메모[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])',
-                r'(\d{3}-\d{3,4}-\d{4})',  # 전화번호 패턴
-                r'(\d{6})',  # 생년월일 패턴 (6자리)
+            import re
+            # 민감한 필드 패턴 및 대체 문자열 정의
+            self.patterns_and_replacements = [
+                # 따옴표로 묶인 값을 가진 필드 (JSON 형식)
+                (re.compile(r'(소유자명[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])'), r'\1[REDACTED]\3'),
+                (re.compile(r'(소유자주소[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])'), r'\1[REDACTED]\3'),
+                (re.compile(r'(소유주연락처[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])'), r'\1[REDACTED]\3'),
+                (re.compile(r'(비공개메모[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])'), r'\1[REDACTED]\3'),
+                
+                # 숫자 값을 가진 필드 (JSON 형식)
+                (re.compile(r'(소유자생년월일[\'"]\s*:\s*)([\d]+)'), r'\1[REDACTED]'),
+                
+                # 일반 전화번호 및 생년월일 패턴
+                (re.compile(r'(\d{3}-\d{3,4}-\d{4})'), '[REDACTED-PHONE]'),
+                (re.compile(r'(\b\d{6}\b)'), '[REDACTED-DOB]')
             ]
-            self.replacement = r'\1[REDACTED]\3' if r'\3' in r'\1[REDACTED]\3' else r'\1[REDACTED]'
         
         def filter(self, record):
             if isinstance(record.msg, str):
                 # 민감한 정보 마스킹 처리
                 message = record.msg
-                for pattern in self.sensitive_patterns:
-                    import re
-                    message = re.sub(pattern, self.replacement, message)
+                for pattern, replacement in self.patterns_and_replacements:
+                    message = pattern.sub(replacement, message)
                 record.msg = message
                 
             # args에 있는 데이터도 확인 (로그 포맷 문자열에 %s 등으로 전달되는 데이터)
@@ -1190,9 +1194,8 @@ def setup_detailed_logging():
                 args_list = list(record.args)
                 for i, arg in enumerate(args_list):
                     if isinstance(arg, str):
-                        for pattern in self.sensitive_patterns:
-                            import re
-                            args_list[i] = re.sub(pattern, self.replacement, arg)
+                        for pattern, replacement in self.patterns_and_replacements:
+                            args_list[i] = pattern.sub(replacement, arg)
                     elif isinstance(arg, dict):
                         # 딕셔너리 내부의 민감한 키 마스킹
                         sensitive_keys = ['소유자명', '소유자생년월일', '소유자주소', '소유주연락처', '비공개메모']
