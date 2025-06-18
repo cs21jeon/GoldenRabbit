@@ -288,8 +288,9 @@ def create_map():
         if field_values.get('주용도'):
             popup_html += f'<div class="popup-info">용도: {field_values["주용도"]}</div>'
         
-        # 상세내역 보기 링크 추가
+        # 상세내역 보기 링크 추가 (수정됨)
         popup_html += f'<a href="javascript:void(0);" onclick="parent.openPropertyDetail(\'{record_id}\')" class="detail-link">상세내역보기-클릭</a>'
+
         # 이 매물 문의하기 링크 추가
         popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" class="detail-link" style="background-color:#2962FF; color:white; margin-top:5px;">이 매물 문의하기</a>'
 
