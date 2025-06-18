@@ -313,18 +313,28 @@ def create_map():
         marker.add_to(folium_map)
         marker_index += 1
 
-    # JavaScript 필터링 코드 추가
+    # JavaScript 필터링 코드 추가 - 완전 수정 버전
     javascript_code = f"""
     <script>
     var allProperties = {json.dumps(javascript_data, ensure_ascii=False)};
-    
+
     // 마커 참조 저장
     var markers = {{}};
-    
+
     // Leaflet 맵이 로드된 후 실행
     document.addEventListener('DOMContentLoaded', function() {{
-        if (typeof {folium_map._name} !== 'undefined') {{
-            {folium_map._name}.eachLayer(function(layer) {{
+        // 실제 leaflet 맵 변수를 자동으로 찾기
+        var actualMap = null;
+        for (var key in window) {{
+            if (key.startsWith('leaflet_map_') && window[key] && window[key].eachLayer) {{
+                actualMap = window[key];
+                window.leafletMap = actualMap; // 별칭 생성
+                break;
+            }}
+        }}
+        
+        if (actualMap) {{
+            actualMap.eachLayer(function(layer) {{
                 if (layer instanceof L.Marker) {{
                     var markerName = layer._myName;
                     if (markerName && markerName.startsWith('marker_')) {{
@@ -341,6 +351,17 @@ def create_map():
         var filteredProperties = [];
         var totalCount = allProperties.length;
         var filteredCount = 0;
+        
+        // 실제 맵 참조 가져오기
+        var actualMap = window.leafletMap;
+        if (!actualMap) {{
+            for (var key in window) {{
+                if (key.startsWith('leaflet_map_') && window[key] && window[key].eachLayer) {{
+                    actualMap = window[key];
+                    break;
+                }}
+            }}
+        }}
         
         allProperties.forEach(function(property, index) {{
             var shouldShow = true;
@@ -399,11 +420,11 @@ def create_map():
             
             // 마커 표시/숨김
             var marker = markers[index];
-            if (marker) {{
+            if (marker && actualMap) {{
                 if (shouldShow) {{
-                    marker.addTo({folium_map._name});
+                    marker.addTo(actualMap);
                 }} else {{
-                    {folium_map._name}.removeLayer(marker);
+                    actualMap.removeLayer(marker);
                 }}
             }}
         }});
@@ -414,9 +435,22 @@ def create_map():
     
     // 전체 마커 표시
     function showAllMarkers() {{
-        Object.values(markers).forEach(function(marker) {{
-            marker.addTo({folium_map._name});
-        }});
+        // 실제 맵 참조 가져오기
+        var actualMap = window.leafletMap;
+        if (!actualMap) {{
+            for (var key in window) {{
+                if (key.startsWith('leaflet_map_') && window[key] && window[key].eachLayer) {{
+                    actualMap = window[key];
+                    break;
+                }}
+            }}
+        }}
+        
+        if (actualMap) {{
+            Object.values(markers).forEach(function(marker) {{
+                marker.addTo(actualMap);
+            }});
+        }}
     }}
     
     // 부모 창과 통신
@@ -439,8 +473,19 @@ def create_map():
     
     // 마커에 인덱스 저장
     document.addEventListener('DOMContentLoaded', function() {{
-        if (typeof {folium_map._name} !== 'undefined') {{
-            {folium_map._name}.eachLayer(function(layer) {{
+        // 실제 맵 참조 가져오기
+        var actualMap = window.leafletMap;
+        if (!actualMap) {{
+            for (var key in window) {{
+                if (key.startsWith('leaflet_map_') && window[key] && window[key].eachLayer) {{
+                    actualMap = window[key];
+                    window.leafletMap = actualMap; // 별칭 생성
+                }}
+            }}
+        }}
+        
+        if (actualMap) {{
+            actualMap.eachLayer(function(layer) {{
                 if (layer instanceof L.Marker && layer.options.icon) {{
                     var iconHtml = layer.options.icon.options.html;
                     var match = iconHtml.match(/>([\d,]+)만원<|>([\d.]+)억원</);
