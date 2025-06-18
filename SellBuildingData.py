@@ -268,12 +268,16 @@ def create_map():
         detail_url = f"/property-detail.html?id={record_id}"
         
         # 개선된 팝업 HTML 구조
+        # SellBuildingData.py에서 팝업 HTML 생성 부분 수정
+
+        # 기존 팝업 HTML 생성 부분을 다음과 같이 수정:
+
         popup_html = f"""
         <div class="popup-content">
             <div class="popup-title">{name}</div>
             <div class="popup-info">매가: {price_display}</div>
         """
-        
+
         if field_values.get('토지면적(㎡)'):
             try:
                 sqm = float(field_values['토지면적(㎡)'])
@@ -287,12 +291,71 @@ def create_map():
             
         if field_values.get('주용도'):
             popup_html += f'<div class="popup-info">용도: {field_values["주용도"]}</div>'
-        
-        # 상세내역 보기 링크 추가 (수정됨)
-        popup_html += f'<a href="javascript:void(0);" onclick="parent.openPropertyDetail(\'{record_id}\')" class="detail-link">상세내역보기-클릭</a>'
 
-        # 이 매물 문의하기 링크 추가
-        popup_html += f'<a href="javascript:void(0);" onclick="parent.openConsultModal(\'{address}\')" class="detail-link" style="background-color:#2962FF; color:white; margin-top:5px;">이 매물 문의하기</a>'
+        # ← 상세내역 보기 링크 수정 (더 안전한 방법으로)
+        popup_html += f'''
+        <a href="javascript:void(0);" 
+        onclick="(function() {{
+            try {{
+                // 부모 창에서 전체화면 상태 확인
+                if (parent.document.querySelector('.map-container.fullscreen')) {{
+                    console.log('전체화면 상태에서 매물 상세 열기');
+                    // 전체화면 상태에서는 포커스도 이동
+                    parent.focus();
+                }}
+                if (parent.openPropertyDetailGlobal) {{
+                    parent.openPropertyDetailGlobal('{record_id}');
+                }} else if (parent.openPropertyDetailModal) {{
+                    parent.openPropertyDetailModal('{record_id}');
+                }} else {{
+                    parent.postMessage({{
+                        action: 'openPropertyDetail',
+                        recordId: '{record_id}',
+                        isFullscreen: !!parent.document.querySelector('.map-container.fullscreen')
+                    }}, '*');
+                }}
+            }} catch(e) {{
+                console.error('매물 상세 열기 실패:', e);
+                parent.postMessage({{
+                    action: 'openPropertyDetail',
+                    recordId: '{record_id}',
+                    isFullscreen: false
+                }}, '*');
+            }}
+        }})()"
+        class="detail-link">
+        상세내역보기-클릭
+        </a>
+        '''
+
+        # 이 매물 문의하기 링크도 수정
+        popup_html += f'''
+        <a href="javascript:void(0);" 
+        onclick="(function() {{
+            try {{
+                if (parent.openConsultModalGlobal) {{
+                    parent.openConsultModalGlobal('{address}');
+                }} else if (parent.openConsultModal) {{
+                    parent.openConsultModal('{address}');
+                }} else {{
+                    parent.postMessage({{
+                        action: 'openConsultModal',
+                        address: '{address}'
+                    }}, '*');
+                }}
+            }} catch(e) {{
+                console.error('상담 모달 열기 실패:', e);
+                parent.postMessage({{
+                    action: 'openConsultModal',
+                    address: '{address}'
+                }}, '*');
+            }}
+        }})()"
+        class="detail-link" 
+        style="background-color:#2962FF; color:white; margin-top:5px;">
+        이 매물 문의하기
+        </a>
+        '''
 
         popup_html += "</div>"
 
