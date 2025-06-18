@@ -256,11 +256,17 @@ def get_property_list():
         with open(all_properties_path, 'r', encoding='utf-8') as f:
             records = json.load(f)
         
+        # 민감한 정보 필터링 적용
+        filtered_records = []
+        for record in records:
+            filtered_record = filter_sensitive_fields(record)
+            filtered_records.append(filtered_record)
+        
         response_data = {
-            "records": records
+            "records": filtered_records
         }
         
-        logger.info(f"백업에서 {len(records)}개 매물 반환")
+        logger.info(f"백업에서 {len(records)}개 매물 반환 (민감정보 필터링 적용)")
         return jsonify(response_data), 200
         
     except Exception as e:
@@ -268,136 +274,81 @@ def get_property_list():
         # 오류 발생 시 에어테이블 API로 폴백
         return get_property_list_from_airtable()
 
-def get_category_property_from_airtable(view_id):
-    """에어테이블에서 직접 카테고리별 대표 매물 가져오기 (폴백용)"""
+def get_property_list_from_airtable():
+    """에어테이블에서 직접 매물 목록 가져오기 (폴백용)"""
+    airtable_key = os.environ.get("AIRTABLE_API_KEY")
+    base_id = os.environ.get("AIRTABLE_BASE_ID") 
+    table_id = os.environ.get("AIRTABLE_TABLE_ID")
+    view_id = os.environ.get("AIRTABLE_VIEW_ID")
+    
+    if not airtable_key:
+        return jsonify({"error": "Airtable API key not set"}), 500
+        
+    headers = {
+        "Authorization": f"Bearer {airtable_key}"
+    }
+    
+    url = f"https://api.airtable.com/v0/{base_id}/{table_id}?view={view_id}"
+    
     try:
-        logger.info(f"카테고리 대표 매물 요청 (에어테이블): view_id = {view_id}")
-        
-        airtable_key = os.environ.get("AIRTABLE_API_KEY")
-        base_id = os.environ.get("AIRTABLE_BASE_ID", "appGSg5QfDNKgFf73") 
-        table_id = os.environ.get("AIRTABLE_TABLE_ID", "tblnR438TK52Gr0HB")
-        
-        if not airtable_key:
-            logger.error("AIRTABLE_API_KEY not set")
-            return jsonify({"error": "Airtable API key not set"}), 500
-            
-        headers = {
-            "Authorization": f"Bearer {airtable_key}"
-        }
-        
-        url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
-        
-        params = {
-            'view': view_id,
-            'filterByFormula': '{대표} = TRUE()',
-            'maxRecords': 1,
-            'sort[0][field]': '매가(만원)',
-            'sort[0][direction]': 'asc'
-        }
-        
-        response = requests.get(url, headers=headers, params=params)
+        response = requests.get(url, headers=headers)
         
         if response.status_code != 200:
-            logger.error(f"Airtable API 오류: {response.text}")
             return jsonify({
                 "error": "Airtable data fetch failed",
-                "details": response.text,
-                "status_code": response.status_code
+                "details": response.text
             }), response.status_code
         
         data = response.json()
         records = data.get('records', [])
         
-        if not records:
-            logger.warning(f"뷰 {view_id}에서 대표 매물을 찾을 수 없습니다.")
-            return jsonify({
-                "error": "No representative property found",
-                "message": "해당 카테고리에 대표로 설정된 매물이 없습니다.",
-                "records": []
-            }), 404
+        # 민감한 정보 필터링 적용
+        filtered_records = []
+        for record in records:
+            filtered_record = filter_sensitive_fields(record)
+            filtered_records.append(filtered_record)
         
-        response_data = {
-            "records": records,
-            "view_id": view_id,
-            "total_count": len(records),
-            "source": "airtable"
-        }
-        
-        return jsonify(response_data), 200
-        
+        return jsonify({"records": filtered_records}), 200
     except Exception as e:
-        logger.error(f"에어테이블 카테고리 매물 API 오류: {str(e)}")
-        return jsonify({
-            "error": "Internal server error",
-            "details": str(e)
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/api/category-property', methods=['GET'])
-def get_category_property():
-    """백업된 카테고리별 대표 매물 가져오기 (백업 우선, 에어테이블 폴백)"""
+def get_property_list_from_airtable():
+    """에어테이블에서 직접 매물 목록 가져오기 (폴백용)"""
+    airtable_key = os.environ.get("AIRTABLE_API_KEY")
+    base_id = os.environ.get("AIRTABLE_BASE_ID") 
+    table_id = os.environ.get("AIRTABLE_TABLE_ID")
+    view_id = os.environ.get("AIRTABLE_VIEW_ID")
+    
+    if not airtable_key:
+        return jsonify({"error": "Airtable API key not set"}), 500
+        
+    headers = {
+        "Authorization": f"Bearer {airtable_key}"
+    }
+    
+    url = f"https://api.airtable.com/v0/{base_id}/{table_id}?view={view_id}"
+    
     try:
-        view_id = request.args.get('view')
-        if not view_id:
-            return jsonify({"error": "View ID parameter is required"}), 400
+        response = requests.get(url, headers=headers)
         
-        # 뷰 ID에 따른 파일 선택
-        filename = None
-        if view_id == 'viwzEVzrr47fCbDNU':  # 재건축용 토지
-            filename = 'reconstruction_properties.json'
-        elif view_id == 'viwxS4dKAcQWmB0Be':  # 고수익률 건물
-            filename = 'high_yield_properties.json'
-        elif view_id == 'viwUKnawSP8SkV9Sx':  # 저가단독주택
-            filename = 'low_cost_properties.json'
-        else:
-            # 정의되지 않은 뷰 ID인 경우 에어테이블 API로 폴백
-            return get_category_property_from_airtable(view_id)
-        
-        file_path = os.path.join(BACKUP_DIR, filename)
-        
-        if not os.path.exists(file_path):
-            # 백업 파일이 없는 경우 에어테이블 API로 폴백
-            logger.warning(f"백업 파일을 찾을 수 없어 에어테이블 API로 폴백합니다: {filename}")
-            return get_category_property_from_airtable(view_id)
-        
-        # 파일에서 데이터 로드
-        with open(file_path, 'r', encoding='utf-8') as f:
-            all_records = json.load(f)
-        
-        # '대표' 필드가 체크된 레코드만 필터링
-        representative_records = [
-            r for r in all_records
-            if r.get('fields', {}).get('대표') == True
-        ]
-        
-        # 결과가 없으면 모든 레코드 중 첫 번째 사용
-        if not representative_records and all_records:
-            representative_records = [all_records[0]]
-        
-        # 응답 구조를 명확하게 정의
-        response_data = {
-            "records": representative_records,
-            "view_id": view_id,
-            "total_count": len(representative_records),
-            "source": "backup",
-            "success": True  # 성공 여부 명시
-        }
-        
-        logger.info(f"백업에서 카테고리 대표 매물 반환: {len(representative_records)}개")
-        return jsonify(response_data), 200
-        
-    except Exception as e:
-        logger.error(f"백업 카테고리 매물 API 오류: {str(e)}")
-        import traceback
-        logger.error(f"상세 오류: {traceback.format_exc()}")
-        # 오류 발생 시 에어테이블 API로 폴백
-        try:
-            return get_category_property_from_airtable(view_id)
-        except:
+        if response.status_code != 200:
             return jsonify({
-                "error": "Failed to load category property",
-                "message": str(e),
-                "success": False
-            }), 500
+                "error": "Airtable data fetch failed",
+                "details": response.text
+            }), response.status_code
+        
+        data = response.json()
+        records = data.get('records', [])
+        
+        # 민감한 정보 필터링 적용
+        filtered_records = []
+        for record in records:
+            filtered_record = filter_sensitive_fields(record)
+            filtered_records.append(filtered_record)
+        
+        return jsonify({"records": filtered_records}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/debug/backup-files')
 def debug_backup_files():
@@ -529,7 +480,6 @@ def get_property_detail():
 
 @app.route('/api/property-detail-backup')
 def get_property_detail_backup():
-    """백업된 데이터에서 특정 매물 상세 정보 가져오기 (HTML 호환용)"""
     try:
         property_id = request.args.get('id')
         if not property_id:
@@ -550,9 +500,12 @@ def get_property_detail_backup():
         property_data = next((p for p in all_properties if p.get('id') == property_id), None)
         
         if not property_data:
-            return jsonify({'error': f'Property with ID {property_id} not found'}), 404
+            return jsonify({'error': f' Property with ID {property_id} not found'}), 404
         
-        response_data = {'property': property_data}
+        # 민감한 정보 필터링 (이 부분이 추가되어야 함)
+        filtered_property = filter_sensitive_fields(property_data)
+        
+        response_data = {'property': filtered_property}
         
         return jsonify(response_data)
         
@@ -700,7 +653,9 @@ def search_map():
             if not should_include:
                 condition_filtered_count += 1
             else:
-                filtered_records.append(record)
+                # 민감한 정보 필터링 적용
+                filtered_record = filter_sensitive_fields(record)
+                filtered_records.append(filtered_record)
         
         logger.info(f"필터링 요약: 전체 {len(all_records)}, 필터 통과 {len(filtered_records)}")
         
@@ -1170,8 +1125,28 @@ def property_search():
         logger.error(f"AI property search error: {str(e)}")
         return jsonify({"error": f"Error processing request: {str(e)}"}), 500
 
+def filter_sensitive_fields(property_data):
+    """매물 데이터에서 민감한 정보 필터링"""
+    if not property_data or 'fields' not in property_data:
+        return property_data
+        
+    sensitive_fields = [
+        '소유자명', '소유자생년월일', '소유자주소', '소유주연락처', '비공개메모'
+    ]
+    
+    filtered_data = {
+        'id': property_data.get('id'),
+        'fields': {}
+    }
+    
+    for field, value in property_data.get('fields', {}).items():
+        if field not in sensitive_fields:
+            filtered_data['fields'][field] = value
+    
+    return filtered_data
+
 def setup_detailed_logging():
-    """상세한 로깅 설정"""
+    """상세한 로깅 설정 - 개인정보 필터링 포함"""
     # 파일 핸들러
     file_handler = logging.FileHandler('/home/sftpuser/logs/api_detailed.log')
     file_handler.setLevel(logging.DEBUG)
@@ -1184,6 +1159,55 @@ def setup_detailed_logging():
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
     )
+    
+    # 민감한 정보를 필터링하는 필터 클래스 추가
+    class SensitiveDataFilter(logging.Filter):
+        def __init__(self):
+            super().__init__()
+            # 민감한 필드 패턴 정의
+            self.sensitive_patterns = [
+                r'(소유자명[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])',
+                r'(소유자생년월일[\'"]\s*:\s*)([\d]+)',
+                r'(소유자주소[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])',
+                r'(소유주연락처[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])',
+                r'(비공개메모[\'"]\s*:\s*[\'"])([^\'"]+)([\'"])',
+                r'(\d{3}-\d{3,4}-\d{4})',  # 전화번호 패턴
+                r'(\d{6})',  # 생년월일 패턴 (6자리)
+            ]
+            self.replacement = r'\1[REDACTED]\3' if r'\3' in r'\1[REDACTED]\3' else r'\1[REDACTED]'
+        
+        def filter(self, record):
+            if isinstance(record.msg, str):
+                # 민감한 정보 마스킹 처리
+                message = record.msg
+                for pattern in self.sensitive_patterns:
+                    import re
+                    message = re.sub(pattern, self.replacement, message)
+                record.msg = message
+                
+            # args에 있는 데이터도 확인 (로그 포맷 문자열에 %s 등으로 전달되는 데이터)
+            if record.args:
+                args_list = list(record.args)
+                for i, arg in enumerate(args_list):
+                    if isinstance(arg, str):
+                        for pattern in self.sensitive_patterns:
+                            import re
+                            args_list[i] = re.sub(pattern, self.replacement, arg)
+                    elif isinstance(arg, dict):
+                        # 딕셔너리 내부의 민감한 키 마스킹
+                        sensitive_keys = ['소유자명', '소유자생년월일', '소유자주소', '소유주연락처', '비공개메모']
+                        for key in sensitive_keys:
+                            if key in arg:
+                                arg[key] = '[REDACTED]'
+                record.args = tuple(args_list)
+            
+            return True
+    
+    # 필터 적용
+    sensitive_filter = SensitiveDataFilter()
+    file_handler.addFilter(sensitive_filter)
+    console_handler.addFilter(sensitive_filter)
+    
     file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
     
@@ -1191,6 +1215,18 @@ def setup_detailed_logging():
     app.logger.addHandler(file_handler)
     app.logger.addHandler(console_handler)
     app.logger.setLevel(logging.DEBUG)
+    
+    # 기본 로거에도 필터 적용
+    root_logger = logging.getLogger()
+    root_logger.addFilter(sensitive_filter)
+    
+    # 추가로 api_debug.log에도 필터 적용
+    api_debug_handler = logging.FileHandler('/home/sftpuser/logs/api_debug.log')
+    api_debug_handler.setFormatter(formatter)
+    api_debug_handler.addFilter(sensitive_filter)
+    
+    # 로깅 설정이 완료되었음을 알림
+    app.logger.info("로깅 시스템 초기화 완료 - 개인정보 보호 필터 적용됨")
 
 # 애플리케이션 시작 시 로깅 설정
 setup_detailed_logging()
