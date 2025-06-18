@@ -414,7 +414,7 @@ def debug_backup_files():
         logger.error(f"백업 파일 확인 오류: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/category-property', methods=['GET'])
+@app.route('/api/category-properties', methods=['GET'])
 def get_category_properties():
     """백업된 특정 카테고리의 모든 매물 가져오기"""
     try:
