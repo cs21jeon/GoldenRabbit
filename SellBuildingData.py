@@ -216,6 +216,53 @@ def create_map():
     .detail-link:hover {
         background-color: #e6e6e6;
     }
+
+    /* iframe 내부 요소들의 z-index 제한 - 새로 추가 */
+    .leaflet-container {
+        z-index: 1 !important;
+    }
+
+    .leaflet-popup-pane {
+        z-index: 2 !important;
+    }
+
+    .leaflet-marker-pane {
+        z-index: 3 !important;
+    }
+
+    .leaflet-overlay-pane {
+        z-index: 4 !important;
+    }
+
+    .leaflet-shadow-pane {
+        z-index: 5 !important;
+    }
+
+    /* 모든 Leaflet 요소를 낮은 z-index로 제한 */
+    .leaflet-pane {
+        z-index: auto !important;
+    }
+
+    /* 팝업도 낮은 z-index */
+    .leaflet-popup {
+        z-index: 10 !important;
+    }
+
+    .leaflet-popup-content-wrapper {
+        z-index: 10 !important;
+    }
+
+    /* body와 html도 z-index 제한 */
+    html, body {
+        z-index: auto !important;
+        position: relative !important;
+    }
+
+    /* 전체적으로 iframe 내부의 모든 요소 z-index 제한 */
+    * {
+        max-z-index: 100 !important;
+    }                                                      
+
     </style>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
