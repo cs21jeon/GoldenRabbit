@@ -370,7 +370,7 @@ try {{
 
     // 안전한 매물 상세 핸들러
     function handlePropertyDetail(recordId) {{
-        console.log('매물 상세 요청:', recordId);
+        console.log('매물 상세 요청'); // 콘솔 데이터 가림 , recordId
         
         try {{
             // 부모 창에서 전체화면 상태 확인
