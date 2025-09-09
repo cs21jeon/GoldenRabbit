@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 부동산 뉴스레터 자동화 시스템
-네이버 부동산 뉴스 → Claude 요약 → Threads 게시
+네이버 부동산 뉴스 → Claude 요약 → Threads 게시 + 웹사이트 업데이트
 """
 
 import sys
 import os
 import logging
+import json
 from datetime import datetime
 from typing import List, Dict
 
@@ -42,6 +43,93 @@ class NewsletterService:
             self.logger.error(f"모듈 초기화 실패: {e}")
             raise
 
+    def save_news_for_web(self, summarized_news: List[Dict[str, str]]):
+        """웹사이트용 뉴스 데이터 저장 - 오전에만 실행, 5개 뉴스"""
+        try:
+            current_hour = datetime.now().hour
+            
+            # 오전 시간대(6시~12시)에만 웹사이트 업데이트
+            if not (6 <= current_hour < 12):
+                self.logger.info(f"현재 시간({current_hour}시)은 웹사이트 업데이트 시간이 아닙니다. (오전 6-12시만 업데이트)")
+                return
+            
+            web_news_data = {
+                'update_time': datetime.now().isoformat(),
+                'news': []
+            }
+            
+            # 상위 5개 뉴스만 저장
+            for news in summarized_news[:5]:
+                thumbnail_url = self._extract_thumbnail(news.get('url', '')) or '/images/default_news.jpg'
+                
+                web_news_data['news'].append({
+                    'title': news['title'],
+                    'summary': self._clean_summary_for_web(news['summary']),
+                    'url': news['url'],
+                    'thumbnail': thumbnail_url,
+                    'published': datetime.now().strftime('%Y-%m-%d %H:%M')
+                })
+            
+            # 웹사이트 디렉토리에 저장 (이전 파일 완전 덮어쓰기)
+            web_data_dir = '/home/sftpuser/www/data'
+            os.makedirs(web_data_dir, exist_ok=True)
+            
+            with open(f'{web_data_dir}/latest_news.json', 'w', encoding='utf-8') as f:
+                json.dump(web_news_data, f, ensure_ascii=False, indent=2)
+            
+            self.logger.info(f"웹사이트용 뉴스 데이터 저장 완료: {len(web_news_data['news'])}개 (오전 업데이트)")
+            
+        except Exception as e:
+            self.logger.error(f"웹사이트용 뉴스 저장 실패: {e}")
+
+    def _extract_thumbnail(self, news_url: str) -> str:
+        """뉴스 URL에서 썸네일 이미지 추출"""
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            
+            response = requests.get(news_url, timeout=10)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Open Graph 이미지 찾기
+            og_image = soup.find('meta', property='og:image')
+            if og_image and og_image.get('content'):
+                return og_image['content']
+            
+            # 첫 번째 이미지 찾기
+            img_tag = soup.find('img')
+            if img_tag and img_tag.get('src'):
+                img_src = img_tag['src']
+                if img_src.startswith('http'):
+                    return img_src
+                elif img_src.startswith('//'):
+                    return f"https:{img_src}"
+            
+            return None
+            
+        except Exception as e:
+            self.logger.warning(f"썸네일 추출 실패 ({news_url}): {e}")
+            return None
+
+    def _clean_summary_for_web(self, summary: str) -> str:
+        """웹 표시용으로 요약 텍스트 정리"""
+        lines = summary.split('\n')
+        clean_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if line:
+                # 앞의 숫자나 기호 제거
+                line = line.lstrip('1234567890.- •')
+                clean_lines.append(line)
+        
+        # 최대 100자로 제한
+        clean_summary = ' '.join(clean_lines)
+        if len(clean_summary) > 100:
+            clean_summary = clean_summary[:97] + '...'
+            
+        return clean_summary
+
     def run_daily_newsletter(self, news_count: int = 5) -> bool:
         """일일 뉴스레터 실행"""
         try:
@@ -67,6 +155,10 @@ class NewsletterService:
                 return False
 
             self.logger.info(f"뉴스 요약 완료: {len(summarized_news)}개")
+
+            # 2.5단계: 웹사이트용 뉴스 데이터 저장 (오전에만)
+            self.logger.info("2.5단계: 웹사이트용 뉴스 데이터 저장 중...")
+            self.save_news_for_web(summarized_news)
 
             # 3단계: Threads 게시글 생성
             self.logger.info("3단계: Threads 게시글 생성 중...")
@@ -106,6 +198,9 @@ class NewsletterService:
     def _log_execution_summary(self, news_list: List[Dict], summarized_news: List[Dict],
                              post_id: str, duration: float):
         """실행 결과 요약 로깅"""
+        current_hour = datetime.now().hour
+        web_updated = "예" if 6 <= current_hour < 12 else "아니오 (오전 시간대 아님)"
+        
         summary = f"""
 ==========================================
 뉴스레터 실행 결과 요약
@@ -114,6 +209,7 @@ class NewsletterService:
 소요 시간: {duration:.2f}초
 수집 뉴스: {len(news_list)}개
 요약 완료: {len(summarized_news)}개
+웹사이트 업데이트: {web_updated}
 Threads Post ID: {post_id}
 
 수집된 뉴스 제목:
@@ -149,6 +245,16 @@ Threads Post ID: {post_id}
             test_summary = self.summarizer.summarize_single_news(test_news[0])
             if test_summary:
                 self.logger.info("Claude 요약 테스트 성공")
+                
+                # 웹사이트 저장 테스트
+                self.logger.info("2.5. 웹사이트 저장 테스트...")
+                summarized_test = [{
+                    'title': test_news[0]['title'],
+                    'url': test_news[0]['url'],
+                    'summary': test_summary
+                }]
+                self.save_news_for_web(summarized_test)
+                
             else:
                 self.logger.error("Claude 요약 테스트 실패")
                 return False
@@ -209,11 +315,18 @@ def main():
   python main.py run     - 뉴스레터 실행 (실제 게시)
   python main.py help    - 도움말 표시
 
+동작 방식:
+  - Threads 게시: 하루 2번 (기존 방식 유지)
+  - 웹사이트 업데이트: 오전(6-12시)에만 5개 뉴스 저장
+
 설정 파일:
   .env - 환경변수 설정 (API 키 등)
 
 로그 파일:
   logs/newsletter.log - 실행 로그
+
+웹사이트 연동:
+  /home/sftpuser/www/data/latest_news.json - 웹사이트용 뉴스 데이터
                 """)
                 sys.exit(0)
 

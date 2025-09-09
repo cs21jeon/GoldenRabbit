@@ -1430,6 +1430,157 @@ def services():
         }
     }
 
+# Flask 서버에 추가할 뉴스 관련 엔드포인트
+
+# ===== 뉴스 관련 API =====
+@app.route('/data/latest_news.json')
+def serve_latest_news():
+    """웹사이트용 뉴스 데이터 제공"""
+    try:
+        news_file_path = '/home/sftpuser/www/data/latest_news.json'
+        
+        if not os.path.exists(news_file_path):
+            # 기본 뉴스 데이터 반환
+            default_news = {
+                "update_time": datetime.now().isoformat(),
+                "news": [
+                    {
+                        "title": "뉴스를 준비하고 있습니다",
+                        "summary": "곧 최신 부동산 뉴스를 제공해드리겠습니다.",
+                        "url": "https://land.naver.com/news/",
+                        "thumbnail": "/images/default_news.jpg",
+                        "published": datetime.now().strftime('%Y-%m-%d %H:%M')
+                    }
+                ]
+            }
+            return jsonify(default_news), 200
+        
+        # 파일에서 뉴스 데이터 읽기
+        with open(news_file_path, 'r', encoding='utf-8') as f:
+            news_data = json.load(f)
+        
+        return jsonify(news_data), 200
+        
+    except Exception as e:
+        logger.error(f"뉴스 데이터 제공 오류: {str(e)}")
+        
+        # 오류 시 기본 응답
+        error_response = {
+            "update_time": datetime.now().isoformat(),
+            "news": [],
+            "error": "뉴스 데이터를 불러올 수 없습니다."
+        }
+        return jsonify(error_response), 500
+
+@app.route('/api/news/refresh', methods=['POST'])
+def refresh_news():
+    """뉴스 수동 새로고침 (관리자용)"""
+    try:
+        # 뉴스레터 실행 명령어를 백그라운드에서 실행
+        import subprocess
+        import threading
+        
+        def run_newsletter():
+            try:
+                result = subprocess.run([
+                    'python3', 
+                    '/root/goldenrabbit/real-estate-newsletter/main.py', 
+                    'run'
+                ], capture_output=True, text=True, timeout=300)  # 5분 타임아웃
+                
+                logger.info(f"뉴스레터 실행 결과: {result.returncode}")
+                if result.stdout:
+                    logger.info(f"STDOUT: {result.stdout}")
+                if result.stderr:
+                    logger.error(f"STDERR: {result.stderr}")
+                    
+            except subprocess.TimeoutExpired:
+                logger.error("뉴스레터 실행 타임아웃")
+            except Exception as e:
+                logger.error(f"뉴스레터 실행 오류: {str(e)}")
+        
+        # 백그라운드에서 실행
+        thread = threading.Thread(target=run_newsletter)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            "status": "success",
+            "message": "뉴스 새로고침이 시작되었습니다."
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"뉴스 새로고침 요청 오류: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "뉴스 새로고침 요청 처리 실패"
+        }), 500
+
+@app.route('/api/news/status')
+def news_status():
+    """뉴스 상태 확인"""
+    try:
+        news_file_path = '/home/sftpuser/www/data/latest_news.json'
+        
+        if os.path.exists(news_file_path):
+            stat = os.stat(news_file_path)
+            file_size = stat.st_size
+            modified_time = datetime.fromtimestamp(stat.st_mtime)
+            
+            # 파일 내용 확인
+            with open(news_file_path, 'r', encoding='utf-8') as f:
+                news_data = json.load(f)
+            
+            news_count = len(news_data.get('news', []))
+            last_update = news_data.get('update_time', '')
+            
+            return jsonify({
+                "file_exists": True,
+                "file_size": file_size,
+                "file_modified": modified_time.isoformat(),
+                "news_count": news_count,
+                "last_update": last_update,
+                "status": "available"
+            })
+        else:
+            return jsonify({
+                "file_exists": False,
+                "status": "not_available",
+                "message": "뉴스 파일이 존재하지 않습니다."
+            })
+            
+    except Exception as e:
+        logger.error(f"뉴스 상태 확인 오류: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+# 기본 이미지 제공 (뉴스 썸네일이 없을 때)
+@app.route('/images/default_news.jpg')
+def serve_default_news_image():
+    """기본 뉴스 이미지 제공"""
+    try:
+        # 실제로는 기본 이미지 파일을 제공해야 하지만,
+        # 파일이 없는 경우를 대비한 임시 응답
+        default_image_path = '/home/sftpuser/www/images/default_news.jpg'
+        
+        if os.path.exists(default_image_path):
+            return send_from_directory('/home/sftpuser/www/images', 'default_news.jpg')
+        else:
+            # SVG 형태의 기본 이미지 생성
+            svg_content = '''
+            <svg width="300" height="160" xmlns="http://www.w3.org/2000/svg">
+                <rect width="300" height="160" fill="#f8f9fa"/>
+                <text x="150" y="80" text-anchor="middle" fill="#6c757d" font-family="Arial" font-size="16">📰 뉴스 이미지</text>
+            </svg>
+            '''
+            return make_response(svg_content, 200, {'Content-Type': 'image/svg+xml'})
+            
+    except Exception as e:
+        logger.error(f"기본 뉴스 이미지 제공 오류: {str(e)}")
+        return jsonify({"error": "Image not found"}), 404
+
 # ===== 기타 엔드포인트 =====
 @app.route('/health')
 def health_check():
