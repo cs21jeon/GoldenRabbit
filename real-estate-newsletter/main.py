@@ -49,9 +49,9 @@ class NewsletterService:
             current_hour = datetime.now().hour
             
             # 오전 시간대(6시~12시)에만 웹사이트 업데이트
-            #if not (6 <= current_hour < 12):
-            #    self.logger.info(f"현재 시간({current_hour}시)은 웹사이트 업데이트 시간이 아닙니다. (오전 6-12시만 업데이트)")
-            #    return
+            if not (6 <= current_hour < 12):
+                self.logger.info(f"현재 시간({current_hour}시)은 웹사이트 업데이트 시간이 아닙니다. (오전 6-12시만 업데이트)")
+                return
             
             web_news_data = {
                 'update_time': datetime.now().isoformat(),
