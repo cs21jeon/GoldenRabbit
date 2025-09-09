@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, make_response, send_from_directory, B
 import requests
 import os
 import re
+import sys
 import json
 import glob
 import asyncio
@@ -30,8 +31,11 @@ VERSION_FILE_PATH = '/home/sftpuser/www/version.json'
 # 백업 데이터 관련 경로 설정 (단일 폴더 구조)
 BACKUP_DIR = '/home/sftpuser/www/airtable_backup'
 
+# 현재 디렉토리를 Python 경로에 추가
+sys.path.append('/root/goldenrabbit')
+
 # 환경 변수 로드
-load_dotenv()
+load_dotenv('/root/goldenrabbit/.env')
 
 # Flask 앱 설정
 app = Flask(__name__)
@@ -87,6 +91,19 @@ def get_geocode(address):
     
     response = requests.get(url, params=params)
     return response.json(), response.status_code
+
+# Threads 인증 Blueprint import (파일을 같은 디렉토리에 놓은 경우)
+try:
+    from threads_auth import threads_auth_bp
+    THREADS_AUTH_AVAILABLE = True
+except ImportError:
+    THREADS_AUTH_AVAILABLE = False
+    print("Threads 인증 모듈을 찾을 수 없습니다.")
+
+# 기존 Flask 앱 생성 부분 이후에 추가
+if THREADS_AUTH_AVAILABLE:
+    app.register_blueprint(threads_auth_bp)
+    print("Threads 인증 엔드포인트가 추가되었습니다.")
 
 # ===== V-World API 관련 엔드포인트 =====
 @app.route('/api/vworld')
@@ -1394,6 +1411,24 @@ def clean_html_content(html_content):
         text = text[:147] + '...'
     
     return text
+
+@app.route('/services')
+def services():
+    services_list = [
+        "VWorld API 서비스",
+        "부동산 정보 서비스"
+    ]
+    
+    if THREADS_AUTH_AVAILABLE:
+        services_list.append("Threads API 인증 서비스")
+    
+    return {
+        "available_services": services_list,
+        "endpoints": {
+            "vworld": "/api/...",  # 기존 엔드포인트
+            "threads_auth": "/auth/threads" if THREADS_AUTH_AVAILABLE else None
+        }
+    }
 
 # ===== 기타 엔드포인트 =====
 @app.route('/health')
