@@ -42,6 +42,26 @@ app = Flask(__name__)
 CORS(app)  # CORS 지원 추가
 vworld_key = os.environ.get("VWORLD_APIKEY")
 
+def filter_sensitive_fields(property_data):
+    """매물 데이터에서 민감한 정보 필터링"""
+    if not property_data or 'fields' not in property_data:
+        return property_data
+        
+    sensitive_fields = [
+        '소유자명', '소유자생년월일', '소유자주소', '소유주연락처', '비공개메모'
+    ]
+    
+    filtered_data = {
+        'id': property_data.get('id'),
+        'fields': {}
+    }
+    
+    for field, value in property_data.get('fields', {}).items():
+        if field not in sensitive_fields:
+            filtered_data['fields'][field] = value
+    
+    return filtered_data
+
 # Flask 서버에 정적 파일 경로 추가
 app.static_folder = 'static'
 app.static_url_path = '/static'
@@ -1141,26 +1161,6 @@ def property_search():
     except Exception as e:
         logger.error(f"AI property search error: {str(e)}")
         return jsonify({"error": f"Error processing request: {str(e)}"}), 500
-
-def filter_sensitive_fields(property_data):
-    """매물 데이터에서 민감한 정보 필터링"""
-    if not property_data or 'fields' not in property_data:
-        return property_data
-        
-    sensitive_fields = [
-        '소유자명', '소유자생년월일', '소유자주소', '소유주연락처', '비공개메모'
-    ]
-    
-    filtered_data = {
-        'id': property_data.get('id'),
-        'fields': {}
-    }
-    
-    for field, value in property_data.get('fields', {}).items():
-        if field not in sensitive_fields:
-            filtered_data['fields'][field] = value
-    
-    return filtered_data
 
 def setup_detailed_logging():
     """상세한 로깅 설정 - 개인정보 필터링 포함"""
