@@ -283,7 +283,6 @@ def get_property_list_from_airtable():
 def get_property_list():
     """백업된 매물 목록 가져오기 (백업 우선, 에어테이블 폴백)"""
     try:
-        # 백업 파일에서 데이터 로드 시도
         all_properties_path = os.path.join(BACKUP_DIR, 'all_properties.json')
         
         if not os.path.exists(all_properties_path):
@@ -291,7 +290,17 @@ def get_property_list():
             return get_property_list_from_airtable()
         
         with open(all_properties_path, 'r', encoding='utf-8') as f:
-            records = json.load(f)
+            backup_data = json.load(f)
+        
+        # ========== 추가 ==========
+        if isinstance(backup_data, dict) and 'records' in backup_data:
+            records = backup_data['records']
+        elif isinstance(backup_data, list):
+            records = backup_data
+        else:
+            logger.error(f"백업 파일 구조가 올바르지 않습니다")
+            return get_property_list_from_airtable()
+        # ========== 끝 ==========
         
         # 민감한 정보 필터링 적용
         filtered_records = []
@@ -303,89 +312,12 @@ def get_property_list():
             "records": filtered_records
         }
         
-        logger.info(f"백업에서 {len(records)}개 매물 반환 (민감정보 필터링 적용)")
+        logger.info(f"백업에서 {len(records)}개 매물 반환")
         return jsonify(response_data), 200
         
     except Exception as e:
         logger.error(f"백업 매물 목록 조회 오류: {str(e)}")
-        # 오류 발생 시 에어테이블 API로 폴백
         return get_property_list_from_airtable()
-
-def get_property_list_from_airtable():
-    """에어테이블에서 직접 매물 목록 가져오기 (폴백용)"""
-    airtable_key = os.environ.get("AIRTABLE_API_KEY")
-    base_id = os.environ.get("AIRTABLE_BASE_ID") 
-    table_id = os.environ.get("AIRTABLE_TABLE_ID")
-    view_id = os.environ.get("AIRTABLE_VIEW_ID")
-    
-    if not airtable_key:
-        return jsonify({"error": "Airtable API key not set"}), 500
-        
-    headers = {
-        "Authorization": f"Bearer {airtable_key}"
-    }
-    
-    url = f"https://api.airtable.com/v0/{base_id}/{table_id}?view={view_id}"
-    
-    try:
-        response = requests.get(url, headers=headers)
-        
-        if response.status_code != 200:
-            return jsonify({
-                "error": "Airtable data fetch failed",
-                "details": response.text
-            }), response.status_code
-        
-        data = response.json()
-        records = data.get('records', [])
-        
-        # 민감한 정보 필터링 적용
-        filtered_records = []
-        for record in records:
-            filtered_record = filter_sensitive_fields(record)
-            filtered_records.append(filtered_record)
-        
-        return jsonify({"records": filtered_records}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-def get_property_list_from_airtable():
-    """에어테이블에서 직접 매물 목록 가져오기 (폴백용)"""
-    airtable_key = os.environ.get("AIRTABLE_API_KEY")
-    base_id = os.environ.get("AIRTABLE_BASE_ID") 
-    table_id = os.environ.get("AIRTABLE_TABLE_ID")
-    view_id = os.environ.get("AIRTABLE_VIEW_ID")
-    
-    if not airtable_key:
-        return jsonify({"error": "Airtable API key not set"}), 500
-        
-    headers = {
-        "Authorization": f"Bearer {airtable_key}"
-    }
-    
-    url = f"https://api.airtable.com/v0/{base_id}/{table_id}?view={view_id}"
-    
-    try:
-        response = requests.get(url, headers=headers)
-        
-        if response.status_code != 200:
-            return jsonify({
-                "error": "Airtable data fetch failed",
-                "details": response.text
-            }), response.status_code
-        
-        data = response.json()
-        records = data.get('records', [])
-        
-        # 민감한 정보 필터링 적용
-        filtered_records = []
-        for record in records:
-            filtered_record = filter_sensitive_fields(record)
-            filtered_records.append(filtered_record)
-        
-        return jsonify({"records": filtered_records}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/debug/backup-files')
 def debug_backup_files():
@@ -416,15 +348,26 @@ def debug_backup_files():
                 with open(file_path, 'r', encoding='utf-8') as f:
                     try:
                         data = json.load(f)
-                        record_count = len(data) if isinstance(data, list) else "Not a list"
+                        # 배열인지 객체인지 확인
+                        if isinstance(data, list):
+                            record_count = len(data)
+                            data_type = "array"
+                        elif isinstance(data, dict) and 'records' in data:
+                            record_count = len(data['records'])
+                            data_type = "object_with_records"
+                        else:
+                            record_count = "Unknown structure"
+                            data_type = "unknown"
                     except:
                         record_count = "Invalid JSON"
+                        data_type = "error"
                         
                 files_info[filename] = {
                     "exists": True,
                     "size": stat.st_size,
                     "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "record_count": record_count
+                    "record_count": record_count,
+                    "data_type": data_type
                 }
             else:
                 files_info[filename] = {"exists": False}
@@ -436,7 +379,7 @@ def debug_backup_files():
             files_info["images"] = {
                 "exists": True,
                 "folder_count": len(image_folders),
-                "sample_folders": image_folders[:5]  # 처음 5개만
+                "sample_folders": image_folders[:5]
             }
         else:
             files_info["images"] = {"exists": False}
@@ -461,11 +404,11 @@ def get_category_properties():
         
         # 뷰 ID에 따른 파일 선택
         filename = None
-        if view_id == 'viwzEVzrr47fCbDNU':  # 재건축용 토지
+        if view_id == 'viwzEVzrr47fCbDNU':
             filename = 'reconstruction_properties.json'
-        elif view_id == 'viwxS4dKAcQWmB0Be':  # 고수익률 건물
+        elif view_id == 'viwxS4dKAcQWmB0Be':
             filename = 'high_yield_properties.json'
-        elif view_id == 'viwUKnawSP8SkV9Sx':  # 저가단독주택
+        elif view_id == 'viwUKnawSP8SkV9Sx':
             filename = 'low_cost_properties.json'
         else:
             return jsonify({"error": "Invalid view ID"}), 400
@@ -475,9 +418,18 @@ def get_category_properties():
         if not os.path.exists(file_path):
             return jsonify({"error": "Backup file not found"}), 404
         
-        # 파일에서 데이터 로드
         with open(file_path, 'r', encoding='utf-8') as f:
-            records = json.load(f)
+            backup_data = json.load(f)
+        
+        # ========== 추가 ==========
+        if isinstance(backup_data, dict) and 'records' in backup_data:
+            records = backup_data['records']
+        elif isinstance(backup_data, list):
+            records = backup_data
+        else:
+            logger.error(f"백업 파일 구조가 올바르지 않습니다")
+            return jsonify({"error": "Invalid backup file structure"}), 500
+        # ========== 끝 ==========
         
         # 유효한 상태인 레코드만 필터링
         valid_status = ["네이버", "디스코", "당근", "비공개"]
@@ -508,6 +460,7 @@ def get_category_properties():
         
     except Exception as e:
         logger.error(f"카테고리 매물 목록 API 오류: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/property-detail')
@@ -533,21 +486,33 @@ def get_property_detail_backup():
         with open(file_path, 'r', encoding='utf-8') as f:
             all_properties = json.load(f)
         
-        # 요청된 ID의 매물 찾기
+        # 배열인지 확인하고 아니면 변환
+        if isinstance(all_properties, dict) and 'records' in all_properties:
+            # 객체 구조: {"records": [...]}
+            all_properties = all_properties['records']
+            logger.info(f"객체 구조 감지, records 배열 추출 (총 {len(all_properties)}개)")
+        elif not isinstance(all_properties, list):
+            logger.error(f"백업 파일이 배열이 아닙니다: {type(all_properties)}")
+            return jsonify({'error': 'Invalid backup file format'}), 500
+        
+        # 매물 찾기
         property_data = next((p for p in all_properties if p.get('id') == property_id), None)
         
         if not property_data:
-            return jsonify({'error': f' Property with ID {property_id} not found'}), 404
+            logger.warning(f"매물을 찾을 수 없음: {property_id}")
+            return jsonify({'error': f'Property with ID {property_id} not found'}), 404
         
-        # 민감한 정보 필터링 (이 부분이 추가되어야 함)
+        # 민감한 정보 필터링
         filtered_property = filter_sensitive_fields(property_data)
         
         response_data = {'property': filtered_property}
         
+        logger.info(f"매물 상세 조회 성공: {property_id}")
         return jsonify(response_data)
         
     except Exception as e:
         logger.error(f"매물 상세 조회 중 오류 발생: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
 
 # ===== 검색 및 지도 관련 API =====
@@ -569,8 +534,18 @@ def search_map():
             return jsonify({"error": "Backup file not found"}), 404
         
         with open(all_properties_path, 'r', encoding='utf-8') as f:
-            all_records = json.load(f)
+            backup_data = json.load(f)
         
+        # ========== 추가 ==========
+        if isinstance(backup_data, dict) and 'records' in backup_data:
+            all_records = backup_data['records']
+        elif isinstance(backup_data, list):
+            all_records = backup_data
+        else:
+            logger.error("백업 파일 구조가 올바르지 않습니다")
+            return jsonify({"error": "Invalid backup file structure"}), 500
+        # ========== 끝 ==========
+
         logger.info(f"백업에서 {len(all_records)}개 레코드를 로드했습니다.")
         
         # 필터링 처리
@@ -1055,8 +1030,18 @@ def property_search():
             return jsonify({"error": "Property data not available"}), 500
             
         with open(all_properties_path, 'r', encoding='utf-8') as f:
-            all_records = json.load(f)
-        
+            backup_data = json.load(f)
+
+        # ========== 추가 필요 ==========
+        if isinstance(backup_data, dict) and 'records' in backup_data:
+            all_records = backup_data['records']
+        elif isinstance(backup_data, list):
+            all_records = backup_data
+        else:
+            logger.error("백업 파일 구조가 올바르지 않습니다")
+            return jsonify({"error": "Invalid backup file structure"}), 500
+        # ========== 끝 ==========
+
         # 매물 정보 구조화
         properties = []
         valid_status = ["네이버", "디스코", "당근", "비공개"]

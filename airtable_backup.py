@@ -54,9 +54,10 @@ VIEWS = {
 FULL_REFRESH_MODE = True  # True로 설정하면 매번 완전 새로고침
 
 def save_backup_data(data, filename):
-    """백업 데이터 저장"""
+    """백업 데이터 저장 - 배열 형태로"""
     file_path = os.path.join(BACKUP_DIR, filename)
     with open(file_path, 'w', encoding='utf-8') as f:
+        # 배열만 저장 (메타데이터 제거)
         json.dump(data, f, ensure_ascii=False, indent=2)
     logger.info(f"데이터 저장 완료: {filename} ({len(data)}개 레코드)")
 
@@ -100,7 +101,8 @@ def backup_airtable_data():
     
     # 🆕 완전 새로고침 모드에서 이미지 폴더 정리
     if FULL_REFRESH_MODE:
-        cleanup_image_directory()
+        save_backup_data(view_records, filename)  # 배열 그대로 저장
+        logger.info(f"✅ '{view_name}' 뷰 완전 새로고침 완료: {len(view_records)}개 레코드")
     
     # 각 뷰별로 데이터 백업
     for view_name, view_info in VIEWS.items():
