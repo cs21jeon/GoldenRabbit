@@ -7,6 +7,7 @@ import json
 import glob
 import asyncio
 import threading
+import socket
 import time
 from pathlib import Path
 from dotenv import load_dotenv
@@ -939,6 +940,26 @@ def submit_inquiry():
     
     data = request.json
     logger.info(f"받은 데이터: {data}")
+    
+    # 필수 필드 검증
+    if not data.get('phone') or not data.get('message'):
+        return jsonify({"error": "필수 항목을 입력해주세요"}), 400
+
+    # 이메일 검증
+    email = data.get('email', '').strip()
+    email_valid = False
+    
+    if email:
+        # 이메일 형식 검증
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if re.match(email_pattern, email):
+            email_valid = True
+            logger.info(f"유효한 이메일: {email}")
+        else:
+            logger.warning(f"유효하지 않은 이메일: {email}")
+            email = ""  # 유효하지 않으면 빈 문자열
+    else:
+        logger.info("이메일 없음")
 
     # 매물 종류 매핑
     property_type_map = {
@@ -948,7 +969,6 @@ def submit_inquiry():
         'land': '재건축/토지',
         'sell': '매물접수'
     }
-
     property_type = property_type_map.get(data.get("propertyType"), "기타")
     
     # 구분된 Airtable API 설정
@@ -960,17 +980,17 @@ def submit_inquiry():
         logger.error("AIRTABLE_INQUIRY_KEY not set")
         return jsonify({"error": "Inquiry API key not set"}), 500
 
+    # 1단계: 에어테이블 저장 (이메일발송=False)
     payload = {
-        "records": [
-            {
-                "fields": {
-                    "매물종류": property_type,
-                    "연락처": data.get("phone"),
-                    "이메일": data.get("email"),
-                    "문의사항": data.get("message")
-                }
+        "records": [{
+            "fields": {
+                "매물종류": property_type,
+                "연락처": data.get("phone"),
+                "이메일": email,
+                "문의사항": data.get("message"),
+                "이메일발송": False  # 초기값
             }
-        ]
+        }]
     }
 
     headers = {
@@ -979,28 +999,35 @@ def submit_inquiry():
     }
 
     url = f"https://api.airtable.com/v0/{base_id}/{table_id}"
+    
     try:
-        response = requests.post(url, json=payload, headers=headers)
+        # 에어테이블 저장 (타임아웃 10초)
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
         
-        if response.status_code in [200, 201]:
-            # Airtable 저장 성공 시 이메일 발송 시도
-            try:
-                email_sent = send_consultation_email(data)
-                if email_sent:
-                    logger.info("✅ 상담 문의 이메일 발송 완료")
-                else:
-                    logger.warning("⚠️ 상담 문의 이메일 발송 실패")
-            except Exception as email_error:
-                logger.error(f"❌ 이메일 발송 중 오류: {str(email_error)}")
-            
-            return jsonify({"status": "success"}), 200
-        else:
+        if response.status_code not in [200, 201]:
             logger.error(f"Airtable 저장 실패: {response.text}")
             return jsonify({
                 "error": "Airtable submission failed",
                 "details": response.text
             }), response.status_code
-            
+        
+        # 생성된 레코드 ID 추출
+        created_record = response.json()
+        record_id = created_record['records'][0]['id']
+        logger.info(f"레코드 생성 완료: {record_id}")
+        
+        # 2단계: 백그라운드에서 이메일 발송 및 에어테이블 업데이트
+        threading.Thread(
+            target=send_email_and_update_airtable,
+            args=(data, email, email_valid, record_id, base_id, table_id, headers),
+            daemon=True
+        ).start()
+        
+        return jsonify({"status": "success"}), 200
+        
+    except requests.exceptions.Timeout:
+        logger.error("Airtable 타임아웃")
+        return jsonify({"error": "시간 초과"}), 504
     except Exception as e:
         logger.error(f"상담 접수 전체 오류: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -1235,6 +1262,54 @@ def setup_detailed_logging():
 
 # 애플리케이션 시작 시 로깅 설정
 setup_detailed_logging()
+
+def send_email_and_update_airtable(data, email, email_valid, record_id, base_id, table_id, headers):
+    """이메일 발송 후 에어테이블 '이메일발송' 필드 업데이트"""
+    try:
+        socket.setdefaulttimeout(30)
+        
+        # 이메일이 유효한 경우에만 발송 시도
+        if email_valid and email:
+            logger.info("이메일 발송 시도 중...")
+            try:
+                email_sent = send_consultation_email(data)
+                if email_sent:
+                    logger.info("✅ 이메일 발송 성공")
+                else:
+                    logger.warning("⚠️ 이메일 발송 실패")
+            except Exception as e:
+                logger.error(f"이메일 발송 오류: {str(e)}")
+        else:
+            logger.info("이메일 없거나 유효하지 않음 - 발송 건너뜀")
+        
+        # 3단계: 에어테이블 '이메일발송' 체크 (항상 True)
+        airtable_inquiry_key = os.environ.get("AIRTABLE_INQUIRY_KEY")
+        update_headers = {
+            "Authorization": f"Bearer {airtable_inquiry_key}",
+            "Content-Type": "application/json"
+        }
+        
+        update_url = f"https://api.airtable.com/v0/{base_id}/{table_id}/{record_id}"
+        update_payload = {
+            "fields": {
+                "이메일발송": True  # 항상 체크
+            }
+        }
+        
+        update_response = requests.patch(
+            update_url, 
+            json=update_payload, 
+            headers=update_headers,
+            timeout=10
+        )
+        
+        if update_response.status_code == 200:
+            logger.info(f"✅ 에어테이블 '이메일발송' 체크 완료: {record_id}")
+        else:
+            logger.error(f"에어테이블 업데이트 실패: {update_response.text}")
+            
+    except Exception as e:
+        logger.error(f"백그라운드 처리 오류: {str(e)}")
 
 # ===== 이메일 발송 함수 =====
 def send_consultation_email(customer_data):
